@@ -18,7 +18,7 @@ SECONDES_PAR_HEURE = 5  # 1 heure du dataset = 5 secondes réelles
 VITAUX = {"HR": "hr", "O2Sat": "o2sat", "Temp": "temp", "SBP": "sbp",
           "MAP": "map", "DBP": "dbp", "Resp": "resp"}
 
-fichiers = sorted(DOSSIER.glob("*.psv"))
+fichiers = sorted(DOSSIER.glob("*.psv"))[15000:]
 prochain = 0
 
 
