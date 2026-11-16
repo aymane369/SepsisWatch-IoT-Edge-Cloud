@@ -6,3 +6,44 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+
+  passerelle-1:
+    build: ./passerelle
+    container_name: passerelle-1
+    environment:
+      - SERVICE=1
+      - MQTT_HOST=mosquitto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  passerelle-2:
+    build: ./passerelle
+    container_name: passerelle-2
+    environment:
+      - SERVICE=2
+      - MQTT_HOST=mosquitto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  passerelle-3:
+    build: ./passerelle
+    container_name: passerelle-3
+    environment:
+      - SERVICE=3
+      - MQTT_HOST=mosquitto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  passerelle-4:
+    build: ./passerelle
+    container_name: passerelle-4
+    environment:
+      - SERVICE=4
+      - MQTT_HOST=mosquitto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
