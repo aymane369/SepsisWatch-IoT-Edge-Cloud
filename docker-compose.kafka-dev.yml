@@ -1,0 +1,43 @@
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: kafka
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNE://:9092,CONTROLLER://:9093,EXTERNE://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNE://kafka:9092,EXTERNE://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNE:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNE:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNE
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+
+  passerelle-1:
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+    depends_on:
+      - kafka
+
+  passerelle-2:
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+    depends_on:
+      - kafka
+
+  passerelle-3:
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+    depends_on:
+      - kafka
+
+  passerelle-4:
+    environment:
+      - KAFKA_BOOTSTRAP=kafka:9092
+    depends_on:
+      - kafka

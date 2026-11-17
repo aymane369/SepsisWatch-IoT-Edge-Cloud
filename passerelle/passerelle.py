@@ -32,8 +32,23 @@ def points(param, v):
 
 
 derniers = {}  # lit -> dernières valeurs connues du patient présent
-stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0, "incoherents": 0}
+stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
+         "incoherents": 0, "kafka_envoyes": 0, "kafka_erreurs": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
+KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "vitals.enrichis")
+producteur = None
+if KAFKA_BOOTSTRAP:
+    from confluent_kafka import Producer
+    producteur = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP,
+                           "linger.ms": 50})
+
+
+def rapport_kafka(err, msg):
+    if err is None:
+        stats["kafka_envoyes"] += 1
+    else:
+        stats["kafka_erreurs"] += 1
 def traiter(m):
        # 1. Validation : une valeur hors bornes est écartée du calcul,
     #    mais le message d'origine n'est pas modifié
@@ -111,6 +126,14 @@ def on_message(client, userdata, msg):
 
     topic = f"hopital/service-{SERVICE}/lit-{sortie['lit']:02d}/news2"
     client.publish(topic, json.dumps(sortie), qos=1)
+    if producteur is not None:
+        try:
+            producteur.produce(KAFKA_TOPIC, key=sortie["patient_id"],
+                               value=json.dumps(sortie),
+                               on_delivery=rapport_kafka)
+            producteur.poll(0)
+        except BufferError:
+            stats["kafka_erreurs"] += 1
     if stats["recus"] % 100 == 0:
         n = stats["recus"] - stats["invalides"]
         print(stats, f"latence moy {cumul['reseau'] / n:.1f} ms,",
