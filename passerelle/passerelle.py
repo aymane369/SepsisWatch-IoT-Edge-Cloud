@@ -2,9 +2,12 @@ import json
 import sys
 import os
 import paho.mqtt.client as mqtt
+import time
+from datetime import datetime
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
+SCHEMA_VERSION = 1
 
 BORNES = {"hr": (20, 300), "o2sat": (50, 100), "temp": (25, 45),
           "sbp": (30, 300), "map": (20, 250), "dbp": (10, 200),
@@ -30,7 +33,7 @@ def points(param, v):
 
 derniers = {}  # lit -> dernières valeurs connues du patient présent
 stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0, "incoherents": 0}
-
+cumul = {"reseau": 0.0, "traitement": 0.0}
 def traiter(m):
        # 1. Validation : une valeur hors bornes est écartée du calcul,
     #    mais le message d'origine n'est pas modifié
@@ -81,6 +84,7 @@ def traiter(m):
     m["valeurs_rejetees"] = valeurs_rejetees
     m["passerelle"] = SERVICE
     m["incoherences"] = incoherences
+    m["schema_version"] = SCHEMA_VERSION
     return m
 
 
@@ -90,17 +94,27 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 
 def on_message(client, userdata, msg):
+    arrivee = time.time()
     stats["recus"] += 1
     try:
         m = json.loads(msg.payload)
         sortie = traiter(m)
+        emission = datetime.fromisoformat(sortie["timestamp"]).timestamp()
     except (ValueError, KeyError, TypeError):
         stats["invalides"] += 1
         return
+    depart = time.time()
+    sortie["latence_reseau_ms"] = round((arrivee - emission) * 1000, 2)
+    sortie["traitement_ms"] = round((depart - arrivee) * 1000, 3)
+    cumul["reseau"] += sortie["latence_reseau_ms"]
+    cumul["traitement"] += sortie["traitement_ms"]
+
     topic = f"hopital/service-{SERVICE}/lit-{sortie['lit']:02d}/news2"
     client.publish(topic, json.dumps(sortie), qos=1)
     if stats["recus"] % 100 == 0:
-        print(stats)
+        n = stats["recus"] - stats["invalides"]
+        print(stats, f"latence moy {cumul['reseau'] / n:.1f} ms,",
+              f"traitement moy {cumul['traitement'] / n:.3f} ms")
 
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")

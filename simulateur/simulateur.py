@@ -2,7 +2,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-
+import os
 import pandas as pd
 import paho.mqtt.client as mqtt
 
@@ -35,7 +35,7 @@ def admettre(en_cours=False):
 lits = [admettre(en_cours=True) for _ in range(NB_LITS)]
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simulateur")
-client.connect("localhost", 1883)
+client.connect(os.environ.get("MQTT_HOST", "localhost"), 1883)
 client.loop_start()
 
 tour = 0
