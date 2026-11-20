@@ -10,8 +10,11 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "passerelle"))
 from features import nettoyer, ajouter_mesure, calculer_variables
 
-DOSSIER = Path("data/training_setA")
+DOSSIER = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("data/training_setA")
 NB_PATIENTS = 15000
+if len(sys.argv) > 2:
+    NB_PATIENTS = None if sys.argv[2] == "tous" else int(sys.argv[2])
+SORTIE = sys.argv[3] if len(sys.argv) > 3 else "jeu_entrainement.csv"
 COLONNES = {"HR": "hr", "O2Sat": "o2sat", "Temp": "temp", "SBP": "sbp",
             "MAP": "map", "DBP": "dbp", "Resp": "resp"}
 
@@ -33,7 +36,7 @@ for i, fichier in enumerate(fichiers, 1):
         print(f"{i} patients traités")
 
 table = pd.DataFrame(lignes)
-table.to_csv(Path(__file__).parent / "jeu_entrainement.csv", index=False)
+table.to_csv(Path(__file__).parent / SORTIE, index=False)
 
 patients_sepsis = table.groupby("patient_id")["sepsis"].max().sum()
 print(f"\nLignes : {len(table)}")

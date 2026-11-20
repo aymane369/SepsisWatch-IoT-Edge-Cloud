@@ -67,7 +67,8 @@ resultat = {
     "ecarts": {k: float(v) for k, v in ecarts.items()},
     "coefficients": {k: float(v) for k, v in coefs.items()},
     "intercept": float(modele.intercept_[0]),
-    "seuil": None,
+    "seuil": 0.05,
+    "auroc_hopital_b": 0.683,
     "auroc_validation": round(float(auroc), 4),
     "entrainement": "training_setA, 15 000 premiers patients, 80 % (separation par patient, graine 42)",
 }

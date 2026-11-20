@@ -125,11 +125,11 @@ def test_grille_priorite():
     assert obtenu == attendu, obtenu
 
 
-def sequence(*prios):
+def sequence(*prios, **reglages):
     """Passe une suite de priorités, une par heure, et renvoie les décisions."""
-    memoire = {"alerte_niveau": "aucune", "alerte_depuis": 0, "heures_calmes": 0}
-    return [decider_alerte(memoire, p, h) for h, p in enumerate(prios, 1)]
-
+    memoire = {"alerte_niveau": "aucune", "alerte_depuis": 0,
+               "heures_calmes": 0, "heures_au_dessus": 0}
+    return [decider_alerte(memoire, p, h, **reglages) for h, p in enumerate(prios, 1)]
 
 def test_alerte_une_seule_fois():
     """Même situation pendant 3 heures : une seule alerte"""
@@ -150,8 +150,8 @@ def test_alerte_oscillation():
 
 
 def test_alerte_fin():
-    """Deux heures calmes terminent l'alerte, une nouvelle peut alors repartir"""
-    r = sequence("critique", "aucune", "aucune", "vigilance")
+    """Deux heures calmes terminent l'alerte (réglage à 2 h), une nouvelle peut repartir"""
+    r = sequence("critique", "aucune", "aucune", "vigilance", fin_heures=2)
     assert r == ["nouvelle", None, "fin", "nouvelle"], r
 
 
@@ -159,6 +159,29 @@ def test_alerte_rappel():
     """Situation anormale pendant 6 heures : un rappel"""
     r = sequence(*["critique"] * 7)
     assert r == ["nouvelle", None, None, None, None, None, "rappel"], r
+
+def test_persistance_pic_ignore():
+    """Persistance 2 : un pic de vigilance d'une heure ne déclenche rien"""
+    r = sequence("vigilance", "aucune", "aucune", persistance=2)
+    assert r == [None, None, None], r
+
+
+def test_persistance_deux_heures():
+    """Persistance 2 : vigilance deux heures de suite déclenche l'alerte à la deuxième"""
+    r = sequence("vigilance", "vigilance", persistance=2)
+    assert r == [None, "nouvelle"], r
+
+
+def test_persistance_critique_immediate():
+    """Persistance 2 : une alerte critique part tout de suite"""
+    r = sequence("critique", persistance=2)
+    assert r == ["nouvelle"], r
+
+
+def test_fin_plus_longue():
+    """Fin après 3 heures calmes : deux heures calmes ne suffisent plus"""
+    r = sequence("critique", "aucune", "aucune", "aucune", fin_heures=3)
+    assert r == ["nouvelle", None, None, "fin"], r
 
 
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
@@ -168,7 +191,9 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_message_mal_forme, test_valeur_recente_reprise,
          test_valeur_trop_ancienne,test_doublon_ignore,test_message_en_retard,test_risque_calcule, test_grille_priorite,
          test_alerte_une_seule_fois, test_alerte_aggravation,
-         test_alerte_oscillation, test_alerte_fin, test_alerte_rappel]
+         test_alerte_oscillation, test_alerte_fin, test_alerte_rappel,
+         test_persistance_pic_ignore, test_persistance_deux_heures,
+         test_persistance_critique_immediate, test_fin_plus_longue]
 
 if __name__ == "__main__":
     reussis = 0
