@@ -140,8 +140,9 @@ def on_message(client, userdata, msg):
               f"traitement moy {cumul['traitement'] / n:.3f} ms")
 
 
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")
-client.on_connect = on_connect
-client.on_message = on_message
-client.connect(MQTT_HOST, 1883)
-client.loop_forever()
+if __name__ == "__main__":
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(MQTT_HOST, 1883)
+    client.loop_forever()
