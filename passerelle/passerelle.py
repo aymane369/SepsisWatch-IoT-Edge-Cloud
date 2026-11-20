@@ -34,15 +34,17 @@ def points(param, v):
 
 derniers = {}  # lit -> dernières valeurs connues du patient présent
 stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
-         "incoherents": 0, "kafka_envoyes": 0, "kafka_erreurs": 0}
+         "incoherents": 0, "doublons": 0, "kafka_envoyes": 0, "kafka_erreurs": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
+
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
 KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "vitals.enrichis")
 producteur = None
 if KAFKA_BOOTSTRAP:
     from confluent_kafka import Producer
     producteur = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP,
-                           "linger.ms": 50})
+                           "linger.ms": 50,
+                           "enable.idempotence": True})
 
 
 def rapport_kafka(err, msg):
@@ -51,10 +53,19 @@ def rapport_kafka(err, msg):
     else:
         stats["kafka_erreurs"] += 1
 def traiter(m):
-       # 1. Validation : une valeur hors bornes est écartée du calcul,
-    #    mais le message d'origine n'est pas modifié
     valeurs_rejetees = []
     valeurs = {}
+
+    memoire = derniers.get(m["lit"])
+    if memoire is None or memoire["patient_id"] != m["patient_id"]:
+        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
+                                         "valeurs": {}, "derniere_heure": 0}
+    heure = m["heure_sejour"]
+    if heure <= memoire["derniere_heure"]:
+        stats["doublons"] += 1
+        return None
+    memoire["derniere_heure"] = heure
+
     for param, (mini, maxi) in BORNES.items():
         v = m.get(param)
         if v is not None and not (mini <= v <= maxi):
@@ -75,10 +86,6 @@ def traiter(m):
         stats["incoherents"] += 1
 
     # 2. Dernières valeurs connues (remises à zéro si le patient change)
-    memoire = derniers.get(m["lit"])
-    if memoire is None or memoire["patient_id"] != m["patient_id"]:
-        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"], "valeurs": {}}
-    heure = m["heure_sejour"]
     for param in PARAMS_NEWS2:
         if valeurs[param] is not None:
             memoire["valeurs"][param] = (valeurs[param], heure)
@@ -118,6 +125,8 @@ def on_message(client, userdata, msg):
     try:
         m = json.loads(msg.payload)
         sortie = traiter(m)
+        if sortie is None:
+            return
         emission = datetime.fromisoformat(sortie["timestamp"]).timestamp()
     except (ValueError, KeyError, TypeError):
         stats["invalides"] += 1
@@ -129,7 +138,7 @@ def on_message(client, userdata, msg):
     cumul["traitement"] += sortie["traitement_ms"]
 
     topic = f"hopital/service-{SERVICE}/lit-{sortie['lit']:02d}/news2"
-    client.publish(topic, json.dumps(sortie), qos=1)
+    client.publish(topic, json.dumps(sortie), qos=2)
     if producteur is not None:
         try:
             producteur.produce(KAFKA_TOPIC, key=sortie["patient_id"],
