@@ -1,7 +1,7 @@
 """Tests hors ligne de la passerelle : aucun MQTT, aucun Kafka."""
 import json
 from types import SimpleNamespace
-from passerelle import traiter, on_message, derniers, stats, priorite
+from passerelle import traiter, on_message, derniers, stats, priorite, decider_alerte
 
 
 def message(lit=1, patient="ptest", **valeurs):
@@ -123,13 +123,52 @@ def test_grille_priorite():
               priorite("indetermine", True))
     attendu = ("critique", "urgente", "vigilance", "aucune", "vigilance")
     assert obtenu == attendu, obtenu
+
+
+def sequence(*prios):
+    """Passe une suite de priorités, une par heure, et renvoie les décisions."""
+    memoire = {"alerte_niveau": "aucune", "alerte_depuis": 0, "heures_calmes": 0}
+    return [decider_alerte(memoire, p, h) for h, p in enumerate(prios, 1)]
+
+
+def test_alerte_une_seule_fois():
+    """Même situation pendant 3 heures : une seule alerte"""
+    r = sequence("critique", "critique", "critique")
+    assert r == ["nouvelle", None, None], r
+
+
+def test_alerte_aggravation():
+    """Vigilance puis critique : deux alertes"""
+    r = sequence("vigilance", "critique")
+    assert r == ["nouvelle", "nouvelle"], r
+
+
+def test_alerte_oscillation():
+    """Critique, une heure calme, critique : pas de nouvelle alerte"""
+    r = sequence("critique", "aucune", "critique")
+    assert r == ["nouvelle", None, None], r
+
+
+def test_alerte_fin():
+    """Deux heures calmes terminent l'alerte, une nouvelle peut alors repartir"""
+    r = sequence("critique", "aucune", "aucune", "vigilance")
+    assert r == ["nouvelle", None, "fin", "nouvelle"], r
+
+
+def test_alerte_rappel():
+    """Situation anormale pendant 6 heures : un rappel"""
+    r = sequence(*["critique"] * 7)
+    assert r == ["nouvelle", None, None, None, None, None, "rappel"], r
+
+
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
          test_derniere_valeur_reprise, test_changement_de_patient,
          test_message_mal_forme, test_valeur_recente_reprise,
-         test_valeur_trop_ancienne,test_doublon_ignore,test_message_en_retard,
-         test_risque_calcule, test_grille_priorite]
+         test_valeur_trop_ancienne,test_doublon_ignore,test_message_en_retard,test_risque_calcule, test_grille_priorite,
+         test_alerte_une_seule_fois, test_alerte_aggravation,
+         test_alerte_oscillation, test_alerte_fin, test_alerte_rappel]
 
 if __name__ == "__main__":
     reussis = 0

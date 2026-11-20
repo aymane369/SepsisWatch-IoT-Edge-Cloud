@@ -12,6 +12,9 @@ SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 els
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 SCHEMA_VERSION = 2
 AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
+RAPPEL_HEURES = int(os.environ.get("RAPPEL_HEURES", "6"))
+FIN_HEURES = int(os.environ.get("FIN_HEURES", "2"))
+ORDRE_PRIORITE = {"aucune": 0, "vigilance": 1, "urgente": 2, "critique": 3}
 PARAMS_NEWS2 = ["resp", "o2sat", "sbp", "hr", "temp"]
 
 
@@ -56,11 +59,38 @@ def priorite(niveau, alerte_modele):
         return "critique" if alerte_modele else "urgente"
     return "vigilance" if alerte_modele else "aucune"
 
+def decider_alerte(memoire, prio, heure):
+    """Renvoie 'nouvelle', 'rappel', 'fin' ou None selon l'état de l'alerte du patient."""
+    active = memoire["alerte_niveau"]
 
+    # La situation s'aggrave : alerte immédiate
+    if ORDRE_PRIORITE[prio] > ORDRE_PRIORITE[active]:
+        memoire.update(alerte_niveau=prio, alerte_depuis=heure, heures_calmes=0)
+        return "nouvelle"
+
+    # Aucune alerte en cours et rien de nouveau
+    if active == "aucune":
+        return None
+
+    # Alerte en cours, patient revenu au calme : fin après FIN_HEURES heures calmes
+    if prio == "aucune":
+        memoire["heures_calmes"] += 1
+        if memoire["heures_calmes"] >= FIN_HEURES:
+            memoire.update(alerte_niveau="aucune", heures_calmes=0)
+            return "fin"
+        return None
+
+    # Alerte en cours, situation toujours anormale : rappel toutes les RAPPEL_HEURES heures
+    memoire["heures_calmes"] = 0
+    if heure - memoire["alerte_depuis"] >= RAPPEL_HEURES:
+        memoire["alerte_depuis"] = heure
+        return "rappel"
+    return None
 
 derniers = {}  # lit -> dernières valeurs connues du patient présent
 stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
-         "incoherents": 0, "doublons": 0, "kafka_envoyes": 0, "kafka_erreurs": 0}
+         "incoherents": 0, "doublons": 0, "kafka_envoyes": 0, "kafka_erreurs": 0,
+         "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
@@ -84,7 +114,11 @@ def traiter(m):
 
     memoire = derniers.get(m["lit"])
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
-        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],"valeurs": {}, "derniere_heure": 0,"historique": []}
+               memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
+                                         "valeurs": {}, "derniere_heure": 0,
+                                         "historique": [],
+                                         "alerte_niveau": "aucune",
+                                         "alerte_depuis": 0, "heures_calmes": 0}
     heure = m["heure_sejour"]
     if heure <= memoire["derniere_heure"]:
         stats["doublons"] += 1
@@ -148,6 +182,11 @@ def traiter(m):
 
     # 5. Priorité selon la grille
     m["priorite"] = priorite(niveau, alerte_modele)
+    m["alerte"] = decider_alerte(memoire, m["priorite"], heure)
+    if m["priorite"] != "aucune":
+        stats["sans_memoire"] += 1
+    if m["alerte"] is not None:
+        stats["alertes_" + m["alerte"]] += 1
     return m
 
 
