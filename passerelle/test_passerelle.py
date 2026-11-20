@@ -1,8 +1,7 @@
 """Tests hors ligne de la passerelle : aucun MQTT, aucun Kafka."""
 import json
 from types import SimpleNamespace
-
-from passerelle import traiter, on_message, derniers, stats
+from passerelle import traiter, on_message, derniers, stats, priorite
 
 
 def message(lit=1, patient="ptest", **valeurs):
@@ -108,14 +107,29 @@ def test_message_en_retard():
     traiter(message(heure_sejour=5, **NORMAL))
     r = traiter(message(heure_sejour=3, **NORMAL))
     assert r is None, r
+def test_risque_calcule():
+    """Chaque message reçoit un risque entre 0 et 1, une explication et une priorité"""
+    r = traiter(message(heure_sejour=1, **NORMAL))
+    assert 0 <= r["risque_edge"] <= 1, r["risque_edge"]
+    assert isinstance(r["risque_explication"], list), r["risque_explication"]
+    assert r["priorite"] in ("critique", "urgente", "vigilance", "aucune"), r["priorite"]
+    assert r["schema_version"] == 2, r["schema_version"]
 
+
+def test_grille_priorite():
+    """Grille : le modèle ajoute des alertes, il n'en retire jamais"""
+    obtenu = (priorite("eleve", True), priorite("eleve", False),
+              priorite("moyen", True), priorite("faible", False),
+              priorite("indetermine", True))
+    attendu = ("critique", "urgente", "vigilance", "aucune", "vigilance")
+    assert obtenu == attendu, obtenu
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
          test_derniere_valeur_reprise, test_changement_de_patient,
          test_message_mal_forme, test_valeur_recente_reprise,
-         test_valeur_trop_ancienne,test_doublon_ignore,
-         test_message_en_retard]
+         test_valeur_trop_ancienne,test_doublon_ignore,test_message_en_retard,
+         test_risque_calcule, test_grille_priorite]
 
 if __name__ == "__main__":
     reussis = 0

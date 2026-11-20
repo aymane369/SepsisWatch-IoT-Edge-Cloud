@@ -4,15 +4,14 @@ import os
 import paho.mqtt.client as mqtt
 import time
 from datetime import datetime
+import math
+from pathlib import Path
+from features import BORNES, nettoyer, ajouter_mesure, calculer_variables
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
-
-BORNES = {"hr": (20, 300), "o2sat": (50, 100), "temp": (25, 45),
-          "sbp": (30, 300), "map": (20, 250), "dbp": (10, 200),
-          "resp": (1, 80)}
 PARAMS_NEWS2 = ["resp", "o2sat", "sbp", "hr", "temp"]
 
 
@@ -30,6 +29,33 @@ def points(param, v):
     if param == "temp":
         return 3 if v <= 35.0 else 1 if v <= 36.0 else 0 if v <= 38.0 else 1 if v <= 39.0 else 2
     return 0
+
+CHEMIN_MODELE = Path(__file__).parent / "modele.json"
+modele = json.loads(CHEMIN_MODELE.read_text()) if CHEMIN_MODELE.exists() else None
+
+
+def predire(variables):
+    """Risque de sepsis et les variables qui le font le plus monter."""
+    z = modele["intercept"]
+    contributions = {}
+    for v in modele["variables"]:
+        x = variables.get(v)
+        if x is None:
+            x = modele["medianes"][v]
+        c = modele["coefficients"][v] * (x - modele["moyennes"][v]) / modele["ecarts"][v]
+        contributions[v] = c
+        z += c
+    risque = 1 / (1 + math.exp(-z))
+    plus_fortes = sorted(contributions.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    return risque, [v for v, c in plus_fortes if c > 0]
+
+
+def priorite(niveau, alerte_modele):
+    """Grille : NEWS2 élevé et modèle combinés, le modèle n'enlève jamais d'alerte."""
+    if niveau == "eleve":
+        return "critique" if alerte_modele else "urgente"
+    return "vigilance" if alerte_modele else "aucune"
+
 
 
 derniers = {}  # lit -> dernières valeurs connues du patient présent
@@ -58,8 +84,7 @@ def traiter(m):
 
     memoire = derniers.get(m["lit"])
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
-        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
-                                         "valeurs": {}, "derniere_heure": 0}
+        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],"valeurs": {}, "derniere_heure": 0,"historique": []}
     heure = m["heure_sejour"]
     if heure <= memoire["derniere_heure"]:
         stats["doublons"] += 1
@@ -111,6 +136,18 @@ def traiter(m):
     m["incoherences"] = incoherences
     m["schema_version"] = SCHEMA_VERSION
     m["news2_nb_reprises"] = nb_reprises
+        # 4. Modèle Edge : risque de sepsis
+    ajouter_mesure(memoire["historique"], heure, nettoyer(m))
+    alerte_modele = False
+    if modele is not None:
+        risque, explication = predire(calculer_variables(memoire["historique"], heure))
+        alerte_modele = risque >= modele["seuil"]
+        m["risque_edge"] = round(risque, 4)
+        m["risque_alerte"] = alerte_modele
+        m["risque_explication"] = explication
+
+    # 5. Priorité selon la grille
+    m["priorite"] = priorite(niveau, alerte_modele)
     return m
 
 
