@@ -8,6 +8,7 @@ from datetime import datetime
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 SCHEMA_VERSION = 1
+AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
 
 BORNES = {"hr": (20, 300), "o2sat": (50, 100), "temp": (25, 45),
           "sbp": (30, 300), "map": (20, 250), "dbp": (10, 200),
@@ -77,13 +78,15 @@ def traiter(m):
     memoire = derniers.get(m["lit"])
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
         memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"], "valeurs": {}}
+    heure = m["heure_sejour"]
     for param in PARAMS_NEWS2:
         if valeurs[param] is not None:
-            memoire["valeurs"][param] = valeurs[param]
-
+            memoire["valeurs"][param] = (valeurs[param], heure)
     # 3. Score NEWS2 partiel
-    pts = [points(p, v) for p, v in memoire["valeurs"].items()]
+    utilisables = {p: (v, h) for p, (v, h) in memoire["valeurs"].items() if heure - h <= AGE_MAX_HEURES}
+    pts = [points(p, v) for p, (v, h) in utilisables.items()]
     score = sum(pts)
+    nb_reprises = sum(1 for v, h in utilisables.values() if h < heure)
     if len(pts) < 3:
         niveau = "indetermine"
     elif score >= 7:
@@ -100,6 +103,7 @@ def traiter(m):
     m["passerelle"] = SERVICE
     m["incoherences"] = incoherences
     m["schema_version"] = SCHEMA_VERSION
+    m["news2_nb_reprises"] = nb_reprises
     return m
 
 

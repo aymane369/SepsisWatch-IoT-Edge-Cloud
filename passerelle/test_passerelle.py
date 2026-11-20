@@ -82,12 +82,26 @@ def test_message_mal_forme():
     on_message(None, None, SimpleNamespace(payload=texte.encode()))
     assert stats["invalides"] == avant + 1, stats["invalides"]
 
+def test_valeur_recente_reprise():
+    """Une valeur de 3 heures est reprise et comptée comme reprise"""
+    traiter(message(heure_sejour=1, **{**NORMAL, "temp": 39.5}))
+    r = traiter(message(heure_sejour=4, **{**NORMAL, "temp": None}))
+    assert r["news2"] == 2 and r["news2_nb_reprises"] == 1, (r["news2"], r["news2_nb_reprises"])
+
+
+def test_valeur_trop_ancienne():
+    """Une valeur de plus de 6 heures n'est plus utilisée"""
+    traiter(message(heure_sejour=1, **{**NORMAL, "temp": 39.5}))
+    r = traiter(message(heure_sejour=10, **{**NORMAL, "temp": None}))
+    assert r["news2"] == 0 and r["news2_nb_params"] == 4, (r["news2"], r["news2_nb_params"])
+
 
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
          test_derniere_valeur_reprise, test_changement_de_patient,
-         test_message_mal_forme]
+         test_message_mal_forme, test_valeur_recente_reprise,
+         test_valeur_trop_ancienne]
 
 if __name__ == "__main__":
     reussis = 0
