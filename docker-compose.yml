@@ -19,6 +19,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
+      - ./etat:/app/etat
 
   passerelle-2:
     build: ./passerelle
@@ -31,6 +32,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
+      - ./etat:/app/etat
   passerelle-3:
     build: ./passerelle
     container_name: passerelle-3
@@ -42,6 +44,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
+      - ./etat:/app/etat
   passerelle-4:
     build: ./passerelle
     container_name: passerelle-4
@@ -53,6 +56,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
+      - ./etat:/app/etat
   nodered:
     image: nodered/node-red:latest
     container_name: nodered

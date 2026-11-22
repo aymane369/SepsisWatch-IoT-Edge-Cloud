@@ -113,6 +113,11 @@ class ModeleEnLigne:
         xs = self._vecteur(variables)
         return _sigmoide(self.intercept + sum(c * x for c, x in zip(self.coef, xs)))
 
+    def contributions(self, variables):
+        """Part de chaque variable dans le score : coefficient × valeur standardisée."""
+        xs = self._vecteur(variables)
+        return {nom: c * x for nom, c, x in zip(self.variables, self.coef, xs)}
+
     def apprendre(self, variables, etiquette):
         # 1) mise à jour des moyennes et des écarts avec les valeurs présentes
         for i, nom in enumerate(self.variables):

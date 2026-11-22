@@ -4,3 +4,5 @@ __pycache__/
 entrainement/*.csv
 tampon/
 passerelle/tampon/
+etat/
+passerelle/etat/

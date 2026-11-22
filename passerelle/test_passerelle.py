@@ -78,7 +78,7 @@ def test_message_mal_forme():
     """Un JSON coupé est compté comme invalide, sans planter"""
     avant = stats["invalides"]
     texte = json.dumps(message(**NORMAL))[:-10]
-    on_message(None, None, SimpleNamespace(payload=texte.encode()))
+    on_message(None, None,SimpleNamespace(topic="hopital/service-1/lit-01/vitals",payload=texte.encode()))
     assert stats["invalides"] == avant + 1, stats["invalides"]
 
 def test_valeur_recente_reprise():
@@ -113,7 +113,7 @@ def test_risque_calcule():
     assert 0 <= r["risque_edge"] <= 1, r["risque_edge"]
     assert isinstance(r["risque_explication"], list), r["risque_explication"]
     assert r["priorite"] in ("critique", "urgente", "vigilance", "aucune"), r["priorite"]
-    assert r["schema_version"] == 2, r["schema_version"]
+    assert r["schema_version"] == 3, r["schema_version"]
 
 
 def test_grille_priorite():

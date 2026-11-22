@@ -8,10 +8,11 @@ import math
 from pathlib import Path
 from features import BORNES, nettoyer, ajouter_mesure, calculer_variables
 import tampon
+from apprentissage import ModeleEnLigne, REGLAGES_RETENUS
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # 3 : ajout des champs "modele" et "modele_nb_patients"
 AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
 RAPPEL_HEURES = int(os.environ.get("RAPPEL_HEURES", "6"))
 FIN_HEURES = int(os.environ.get("FIN_HEURES", "3"))
@@ -35,12 +36,13 @@ def points(param, v):
         return 3 if v <= 35.0 else 1 if v <= 36.0 else 0 if v <= 38.0 else 1 if v <= 39.0 else 2
     return 0
 
+
 CHEMIN_MODELE = Path(__file__).parent / "modele.json"
 modele = json.loads(CHEMIN_MODELE.read_text()) if CHEMIN_MODELE.exists() else None
 
 
 def predire(variables):
-    """Risque de sepsis et les variables qui le font le plus monter."""
+    """Risque de sepsis et les variables qui le font le plus monter (modèle fixe)."""
     z = modele["intercept"]
     contributions = {}
     for v in modele["variables"]:
@@ -53,6 +55,79 @@ def predire(variables):
     risque = 1 / (1 + math.exp(-z))
     plus_fortes = sorted(contributions.items(), key=lambda kv: kv[1], reverse=True)[:3]
     return risque, [v for v, c in plus_fortes if c > 0]
+
+
+# ---------- Apprentissage en ligne ----------
+# APPRENTISSAGE=0 pour revenir au modèle fixe sans toucher au code.
+APPRENTISSAGE = os.environ.get("APPRENTISSAGE", "1") == "1" and modele is not None
+DOSSIER_ETAT = Path(os.environ.get("DOSSIER_ETAT", Path(__file__).parent / "etat"))
+CHEMIN_MODELE_EN_LIGNE = DOSSIER_ETAT / f"modele_en_ligne-{SERVICE}.json"
+CHEMIN_PATIENTS_APPRIS = DOSSIER_ETAT / f"patients_appris-{SERVICE}.txt"
+SEJOURS_MAX = 200  # séjours gardés en attente de leur message de sortie
+
+
+def charger_patients_appris():
+    if not CHEMIN_PATIENTS_APPRIS.exists():
+        return set()
+    return set(CHEMIN_PATIENTS_APPRIS.read_text(encoding="utf-8").split())
+
+
+modele_en_ligne = None
+patients_appris = set()
+if APPRENTISSAGE:
+    # modèle sauvegardé s'il existe et n'est pas abîmé, sinon départ depuis modele.json
+    modele_en_ligne = ModeleEnLigne.charger(CHEMIN_MODELE_EN_LIGNE)
+    if modele_en_ligne is None:
+        modele_en_ligne = ModeleEnLigne.depuis_modele(modele, **REGLAGES_RETENUS)
+    patients_appris = charger_patients_appris()
+
+sejours = {}  # patient_id -> {heure: variables}, en attente du message de sortie
+
+
+def predire_en_ligne(variables):
+    """Risque de sepsis et explication, avec le modèle qui apprend."""
+    risque = modele_en_ligne.predire(variables)
+    contributions = modele_en_ligne.contributions(variables)
+    plus_fortes = sorted(contributions.items(), key=lambda kv: kv[1], reverse=True)[:3]
+    return risque, [v for v, c in plus_fortes if c > 0]
+
+
+def garder_variables(patient_id, heure, variables):
+    """Garde les variables de chaque heure du patient jusqu'à son message de sortie."""
+    if patient_id not in sejours:
+        if len(sejours) >= SEJOURS_MAX:
+            del sejours[next(iter(sejours))]  # le plus ancien : sa sortie n'est jamais arrivée
+            stats["sejours_oublies"] += 1
+        sejours[patient_id] = {}
+    sejours[patient_id][heure] = variables
+
+
+def traiter_sortie(s):
+    """Fin de séjour : le modèle apprend des heures du patient que la passerelle a vues."""
+    pid = s["patient_id"]
+    heures = sejours.pop(pid, None)
+    if modele_en_ligne is None:
+        return
+    if pid in patients_appris:
+        stats["sorties_deja_apprises"] += 1  # patient rejoué : on n'apprend jamais deux fois
+        return
+    if not heures:
+        stats["sorties_inconnues"] += 1  # aucune heure vue (passerelle démarrée après sa sortie, par exemple)
+        return
+    etiquettes = s["etiquettes"]
+    n = 0
+    for heure in sorted(heures):
+        if 1 <= heure <= len(etiquettes):
+            modele_en_ligne.apprendre(heures[heure], etiquettes[heure - 1])
+            n += 1
+    # on note le patient d'abord : après une coupure, on préfère perdre un patient que l'apprendre deux fois
+    DOSSIER_ETAT.mkdir(parents=True, exist_ok=True)
+    with open(CHEMIN_PATIENTS_APPRIS, "a", encoding="utf-8") as f:
+        f.write(pid + "\n")
+    patients_appris.add(pid)
+    modele_en_ligne.sauvegarder(CHEMIN_MODELE_EN_LIGNE)
+    stats["apprentissages"] += 1
+    stats["heures_apprises"] += n
 
 
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
@@ -89,6 +164,7 @@ def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
         return "rappel"
     return None
 
+
 def priorite(niveau, alerte_modele):
     """Grille : NEWS2 élevé et modèle combinés, le modèle n'enlève jamais d'alerte."""
     if niveau == "eleve":
@@ -99,7 +175,10 @@ def priorite(niveau, alerte_modele):
 derniers = {}  # lit -> dernières valeurs connues du patient présent
 stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
          "incoherents": 0, "doublons": 0, "kafka_envoyes": 0, "kafka_erreurs": 0,
-         "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0,"tampon_ecrits": 0, "tampon_renvoyes": 0, "tampon_perdus": 0,}
+         "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0,
+         "tampon_ecrits": 0, "tampon_renvoyes": 0, "tampon_perdus": 0,
+         "apprentissages": 0, "heures_apprises": 0, "sorties_deja_apprises": 0,
+         "sorties_inconnues": 0, "sorties_invalides": 0, "sejours_oublies": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
@@ -108,14 +187,16 @@ producteur = None
 if KAFKA_BOOTSTRAP:
     from confluent_kafka import Producer
     producteur = Producer({
-    "bootstrap.servers": KAFKA_BOOTSTRAP,
-    "linger.ms": 50,
-    "enable.idempotence": True,
-    "message.timeout.ms": 30000,})
+        "bootstrap.servers": KAFKA_BOOTSTRAP,
+        "linger.ms": 50,
+        "enable.idempotence": True,
+        "message.timeout.ms": 30000,
+    })
 DOSSIER_TAMPON = Path(os.environ.get("DOSSIER_TAMPON", Path(__file__).parent / "tampon"))
 CHEMIN_TAMPON = DOSSIER_TAMPON / f"tampon-{SERVICE}.jsonl"
 kafka_ok = False       # devient True dès qu'un message est confirmé par Kafka
 dernier_vidage = 0.0
+
 
 def rapport_kafka(err, msg):
     global kafka_ok
@@ -153,17 +234,20 @@ def vider_tampon_si_possible():
     if n:
         stats["tampon_renvoyes"] += n
         print(f"[passerelle-{SERVICE}] {n} messages du tampon renvoyés à Kafka")
+
+
 def traiter(m):
     valeurs_rejetees = []
     valeurs = {}
 
     memoire = derniers.get(m["lit"])
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
-               memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
-                                         "valeurs": {}, "derniere_heure": 0,
-                                         "historique": [],
-                                         "alerte_niveau": "aucune",
-                                         "alerte_depuis": 0, "heures_calmes": 0,"heures_au_dessus": 0}
+        memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
+                                        "valeurs": {}, "derniere_heure": 0,
+                                        "historique": [],
+                                        "alerte_niveau": "aucune",
+                                        "alerte_depuis": 0, "heures_calmes": 0,
+                                        "heures_au_dessus": 0}
     heure = m["heure_sejour"]
     if heure <= memoire["derniere_heure"]:
         stats["doublons"] += 1
@@ -180,6 +264,7 @@ def traiter(m):
         stats["valeurs_rejetees"] += 1
     if all(v is None for v in valeurs.values()):
         stats["vides"] += 1
+
     # 1 bis. Cohérence entre pressions : DBP <= MAP <= SBP
     incoherences = []
     sbp, pam, dbp = valeurs["sbp"], valeurs["map"], valeurs["dbp"]
@@ -193,6 +278,7 @@ def traiter(m):
     for param in PARAMS_NEWS2:
         if valeurs[param] is not None:
             memoire["valeurs"][param] = (valeurs[param], heure)
+
     # 3. Score NEWS2 partiel
     utilisables = {p: (v, h) for p, (v, h) in memoire["valeurs"].items() if heure - h <= AGE_MAX_HEURES}
     pts = [points(p, v) for p, (v, h) in utilisables.items()]
@@ -215,11 +301,21 @@ def traiter(m):
     m["incoherences"] = incoherences
     m["schema_version"] = SCHEMA_VERSION
     m["news2_nb_reprises"] = nb_reprises
-        # 4. Modèle Edge : risque de sepsis
+
+    # 4. Modèle Edge : risque de sepsis
     ajouter_mesure(memoire["historique"], heure, nettoyer(m))
     alerte_modele = False
     if modele is not None:
-        risque, explication = predire(calculer_variables(memoire["historique"], heure))
+        variables = calculer_variables(memoire["historique"], heure)
+        if modele_en_ligne is not None:
+            risque, explication = predire_en_ligne(variables)
+            garder_variables(m["patient_id"], heure, variables)
+            m["modele"] = "en_ligne"
+            m["modele_nb_patients"] = len(patients_appris)
+        else:
+            risque, explication = predire(variables)
+            m["modele"] = "fixe"
+            m["modele_nb_patients"] = 0
         alerte_modele = risque >= modele["seuil"]
         m["risque_edge"] = round(risque, 4)
         m["risque_alerte"] = alerte_modele
@@ -236,12 +332,21 @@ def traiter(m):
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
-    client.subscribe(f"hopital/service-{SERVICE}/+/vitals", qos=1)
+    client.subscribe([(f"hopital/service-{SERVICE}/+/vitals", 1),
+                      (f"hopital/service-{SERVICE}/+/sortie", 1)])
     client.publish(f"hopital/etat/passerelle-{SERVICE}", "en ligne", qos=1, retain=True)
     print(f"Passerelle {SERVICE} connectée")
 
 
 def on_message(client, userdata, msg):
+    # Message de sortie : apprentissage, rien à republier
+    if msg.topic.endswith("/sortie"):
+        try:
+            traiter_sortie(json.loads(msg.payload))
+        except (ValueError, KeyError, TypeError):
+            stats["sorties_invalides"] += 1
+        return
+
     arrivee = time.time()
     stats["recus"] += 1
     try:
@@ -272,6 +377,11 @@ def on_message(client, userdata, msg):
 
 
 if __name__ == "__main__":
+    if modele_en_ligne is not None:
+        print(f"[passerelle-{SERVICE}] apprentissage en ligne actif : "
+              f"{len(patients_appris)} patients déjà appris, {modele_en_ligne.nb_exemples} heures")
+    else:
+        print(f"[passerelle-{SERVICE}] modèle fixe")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")
     client.will_set(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True)
     client.on_connect = on_connect
