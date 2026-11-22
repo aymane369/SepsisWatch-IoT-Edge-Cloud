@@ -200,6 +200,7 @@ def traiter(m):
 
 def on_connect(client, userdata, flags, reason_code, properties):
     client.subscribe(f"hopital/service-{SERVICE}/+/vitals", qos=1)
+    client.publish(f"hopital/etat/passerelle-{SERVICE}", "en ligne", qos=1, retain=True)
     print(f"Passerelle {SERVICE} connectée")
 
 
@@ -239,7 +240,8 @@ def on_message(client, userdata, msg):
 
 if __name__ == "__main__":
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")
+    client.will_set(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True)
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect(MQTT_HOST, 1883)
+    client.connect(MQTT_HOST, 1883, keepalive=10)
     client.loop_forever()

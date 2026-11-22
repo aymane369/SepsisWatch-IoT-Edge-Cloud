@@ -58,13 +58,11 @@
         "type": "switch",
         "z": "f6f2187d.f17ca8",
         "name": "",
-        "property": "payload.niveau",
+        "property": "payload.alerte",
         "propertyType": "msg",
         "rules": [
             {
-                "t": "eq",
-                "v": "eleve",
-                "vt": "str"
+                "t": "nempty"
             }
         ],
         "checkall": "true",
@@ -83,7 +81,7 @@
         "type": "function",
         "z": "f6f2187d.f17ca8",
         "name": "function 1",
-        "func": "const p = msg.payload;\nmsg.topic = \"hopital/alertes/service-\" + p.service;\nmsg.payload = {\n    type: \"news2_eleve\",\n    patient_id: p.patient_id,\n    service: p.service,\n    lit: p.lit,\n    news2: p.news2,\n    news2_nb_params: p.news2_nb_params,\n    timestamp: p.timestamp,\n    message: \"Service \" + p.service + \", lit \" + p.lit + \" : NEWS2 à \" + p.news2\n};\nreturn msg;",
+        "func": "const p = msg.payload;\n\nconst NOMS = {\n    hr: \"fréquence cardiaque\", o2sat: \"saturation en oxygène\", temp: \"température\",\n    sbp: \"pression systolique\", map: \"pression moyenne\", dbp: \"pression diastolique\",\n    resp: \"fréquence respiratoire\", indice_choc: \"indice de choc\",\n    pression_pulsee: \"pression pulsée\"\n};\nconst raisons = [...new Set((p.risque_explication || [])\n    .filter(v => !v.endsWith(\"_age\") && v !== \"heure_sejour\")\n    .map(v => NOMS[v] || NOMS[v.split(\"_\")[0]] || v))];\n\nconst risque = p.risque_edge !== undefined ? Math.round(p.risque_edge * 1000) / 10 : null;\nconst lieu = \"Service \" + p.service + \", lit \" + p.lit;\nlet texte;\n\nif (p.alerte === \"fin\") {\n    texte = \"FIN D'ALERTE - \" + lieu + \" : situation revenue au calme\";\n} else {\n    if (p.priorite === \"critique\") {\n        texte = \"CRITIQUE - \" + lieu + \" : NEWS2 à \" + p.news2 + \" et risque de sepsis \" + risque + \" %\";\n    } else if (p.priorite === \"urgente\") {\n        texte = \"URGENT - \" + lieu + \" : NEWS2 à \" + p.news2;\n    } else {\n        texte = \"VIGILANCE - \" + lieu + \" : risque de sepsis \" + risque + \" %\";\n    }\n    if (raisons.length > 0 && p.priorite !== \"urgente\") {\n        texte += \" (\" + raisons.join(\", \") + \")\";\n    }\n    if (p.alerte === \"rappel\") {\n        texte = \"RAPPEL - \" + texte;\n    }\n}\n\nmsg.topic = \"hopital/alertes/service-\" + p.service;\nmsg.payload = {\n    alerte: p.alerte,\n    type: p.priorite,\n    patient_id: p.patient_id,\n    service: p.service,\n    lit: p.lit,\n    news2: p.news2,\n    risque_edge: p.risque_edge,\n    raisons: raisons,\n    timestamp: p.timestamp,\n    message: texte\n};\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -116,6 +114,48 @@
         "x": 890,
         "y": 340,
         "wires": []
+    },
+    {
+        "id": "bfae755cf43eb462",
+        "type": "mqtt in",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "topic": "hopital/etat/#",
+        "qos": "2",
+        "datatype": "utf8",
+        "broker": "61fd0e5c52c24132",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 230,
+        "y": 420,
+        "wires": [
+            [
+                "7df5af2cf735ceb3"
+            ]
+        ]
+    },
+    {
+        "id": "7df5af2cf735ceb3",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "function 2",
+        "func": "\n// Nom et service de la passerelle, tirés du sujet : hopital/etat/passerelle-2\nconst nom = msg.topic.split(\"/\").pop();\nconst service = Number(nom.split(\"-\")[1]);\n\n// Dernier état connu de chaque passerelle\nconst etats = flow.get(\"etats_passerelles\") || {};\nconst avant = etats[nom];\netats[nom] = msg.payload;\nflow.set(\"etats_passerelles\", etats);\n\nlet alerte, texte;\nif (msg.payload === \"hors ligne\") {\n    alerte = \"panne\";\n    texte = \"PANNE - \" + nom + \" hors ligne : les 20 lits du service \"\n          + service + \" ne sont plus surveillés\";\n} else if (msg.payload === \"en ligne\" && avant === \"hors ligne\") {\n    alerte = \"retour\";\n    texte = \"RETOUR - \" + nom + \" de nouveau en ligne : surveillance du service \"\n          + service + \" rétablie\";\n} else {\n    return null;   // passerelle en ligne au démarrage : rien à signaler\n}\n\nmsg.topic = \"hopital/alertes/technique\";\nmsg.payload = {\n    alerte: alerte,\n    type: \"technique\",\n    service: service,\n    passerelle: nom,\n    timestamp: new Date().toISOString(),\n    message: texte\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 420,
+        "wires": [
+            [
+                "86426944c25efe2b",
+                "f1d239cb3b5f65f5"
+            ]
+        ]
     },
     {
         "id": "61fd0e5c52c24132",
