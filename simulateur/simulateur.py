@@ -8,7 +8,7 @@ import paho.mqtt.client as mqtt
 
 
 import random
-random.seed(42) 
+random.seed(42)
 
 DOSSIER = Path("data/training_setA")
 NB_LITS = 80
@@ -32,6 +32,22 @@ def admettre(en_cours=False):
     return {"patient_id": fichier.stem, "df": df, "heure": heure}
 
 
+def publier_sortie(i, lit):
+    """Fin de séjour : les étiquettes du patient partent sur un topic à part.
+    Elles ne sont jamais envoyées avec les signes vitaux."""
+    service = i // LITS_PAR_SERVICE + 1
+    etiquettes = lit["df"]["SepsisLabel"].fillna(0).astype(int).tolist()
+    message = {
+        "patient_id": lit["patient_id"],
+        "service": service,
+        "lit": i + 1,
+        "etiquettes": etiquettes,  # etiquettes[h - 1] correspond à heure_sejour = h
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    topic = f"hopital/service-{service}/lit-{i + 1:02d}/sortie"
+    client.publish(topic, json.dumps(message), qos=1)
+
+
 lits = [admettre(en_cours=True) for _ in range(NB_LITS)]
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simulateur")
@@ -39,10 +55,13 @@ client.connect(os.environ.get("MQTT_HOST", "localhost"), 1883)
 client.loop_start()
 
 tour = 0
+sorties = 0
 while True:
     for i in range(NB_LITS):
         if lits[i]["heure"] >= len(lits[i]["df"]):
-            lits[i] = admettre()  # séjour terminé, nouveau patient
+            publier_sortie(i, lits[i])  # le séjour est terminé : on publie ses étiquettes
+            sorties += 1
+            lits[i] = admettre()  # nouveau patient
         lit = lits[i]
         ligne = lit["df"].iloc[lit["heure"]]
         service = i // LITS_PAR_SERVICE + 1
@@ -63,5 +82,5 @@ while True:
         lit["heure"] += 1
 
     tour += 1
-    print(f"Tour {tour} : {NB_LITS} messages publiés")
+    print(f"Tour {tour} : {NB_LITS} messages publiés, {sorties} sorties au total")
     time.sleep(SECONDES_PAR_HEURE)
