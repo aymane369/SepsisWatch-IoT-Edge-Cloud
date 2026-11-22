@@ -17,6 +17,8 @@ services:
     depends_on:
       - mosquitto
     restart: unless-stopped
+    volumes:
+      - ./tampon:/app/tampon
 
   passerelle-2:
     build: ./passerelle
@@ -27,7 +29,8 @@ services:
     depends_on:
       - mosquitto
     restart: unless-stopped
-
+    volumes:
+      - ./tampon:/app/tampon
   passerelle-3:
     build: ./passerelle
     container_name: passerelle-3
@@ -37,7 +40,8 @@ services:
     depends_on:
       - mosquitto
     restart: unless-stopped
-
+    volumes:
+      - ./tampon:/app/tampon
   passerelle-4:
     build: ./passerelle
     container_name: passerelle-4
@@ -47,7 +51,8 @@ services:
     depends_on:
       - mosquitto
     restart: unless-stopped
-
+    volumes:
+      - ./tampon:/app/tampon
   nodered:
     image: nodered/node-red:latest
     container_name: nodered

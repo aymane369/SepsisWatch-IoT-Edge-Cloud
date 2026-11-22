@@ -7,6 +7,7 @@ from datetime import datetime
 import math
 from pathlib import Path
 from features import BORNES, nettoyer, ajouter_mesure, calculer_variables
+import tampon
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
@@ -98,7 +99,7 @@ def priorite(niveau, alerte_modele):
 derniers = {}  # lit -> dernières valeurs connues du patient présent
 stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
          "incoherents": 0, "doublons": 0, "kafka_envoyes": 0, "kafka_erreurs": 0,
-         "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0}
+         "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0,"tampon_ecrits": 0, "tampon_renvoyes": 0, "tampon_perdus": 0,}
 cumul = {"reseau": 0.0, "traitement": 0.0}
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
@@ -106,16 +107,52 @@ KAFKA_TOPIC = os.environ.get("KAFKA_TOPIC", "vitals.enrichis")
 producteur = None
 if KAFKA_BOOTSTRAP:
     from confluent_kafka import Producer
-    producteur = Producer({"bootstrap.servers": KAFKA_BOOTSTRAP,
-                           "linger.ms": 50,
-                           "enable.idempotence": True})
-
+    producteur = Producer({
+    "bootstrap.servers": KAFKA_BOOTSTRAP,
+    "linger.ms": 50,
+    "enable.idempotence": True,
+    "message.timeout.ms": 30000,})
+DOSSIER_TAMPON = Path(os.environ.get("DOSSIER_TAMPON", Path(__file__).parent / "tampon"))
+CHEMIN_TAMPON = DOSSIER_TAMPON / f"tampon-{SERVICE}.jsonl"
+kafka_ok = False       # devient True dès qu'un message est confirmé par Kafka
+dernier_vidage = 0.0
 
 def rapport_kafka(err, msg):
+    global kafka_ok
     if err is None:
         stats["kafka_envoyes"] += 1
+        kafka_ok = True
+        return
+    stats["kafka_erreurs"] += 1
+    kafka_ok = False
+    cle = msg.key().decode() if msg.key() else None
+    mettre_en_tampon(cle, msg.value().decode())
+
+
+def mettre_en_tampon(cle, valeur):
+    if tampon.ecrire(CHEMIN_TAMPON, cle, valeur):
+        stats["tampon_ecrits"] += 1
     else:
-        stats["kafka_erreurs"] += 1
+        stats["tampon_perdus"] += 1   # tampon plein
+
+
+def envoyer_kafka(cle, valeur):
+    try:
+        producteur.produce(KAFKA_TOPIC, key=cle, value=valeur, on_delivery=rapport_kafka)
+    except BufferError:
+        # file d'attente du producteur pleine : directement sur disque
+        mettre_en_tampon(cle, valeur)
+
+
+def vider_tampon_si_possible():
+    global dernier_vidage
+    if not kafka_ok or time.time() - dernier_vidage < 5:
+        return
+    dernier_vidage = time.time()
+    n = tampon.vider(CHEMIN_TAMPON, envoyer_kafka)
+    if n:
+        stats["tampon_renvoyes"] += n
+        print(f"[passerelle-{SERVICE}] {n} messages du tampon renvoyés à Kafka")
 def traiter(m):
     valeurs_rejetees = []
     valeurs = {}
@@ -225,13 +262,9 @@ def on_message(client, userdata, msg):
     topic = f"hopital/service-{SERVICE}/lit-{sortie['lit']:02d}/news2"
     client.publish(topic, json.dumps(sortie), qos=2)
     if producteur is not None:
-        try:
-            producteur.produce(KAFKA_TOPIC, key=sortie["patient_id"],
-                               value=json.dumps(sortie),
-                               on_delivery=rapport_kafka)
-            producteur.poll(0)
-        except BufferError:
-            stats["kafka_erreurs"] += 1
+        envoyer_kafka(sortie["patient_id"], json.dumps(sortie))
+        producteur.poll(0)
+        vider_tampon_si_possible()
     if stats["recus"] % 100 == 0:
         n = stats["recus"] - stats["invalides"]
         print(stats, f"latence moy {cumul['reseau'] / n:.1f} ms,",

@@ -2,3 +2,5 @@ data/
 __pycache__/
 .venv/
 entrainement/*.csv
+tampon/
+passerelle/tampon/
