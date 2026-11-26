@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 import math
 from pathlib import Path
-from features import BORNES, nettoyer, ajouter_mesure, calculer_variables
+from features import BORNES, nettoyer, ajouter_mesure, calculer_variables, pressions_incoherentes
 import tampon
 from apprentissage import ModeleEnLigne, REGLAGES_RETENUS
 
@@ -267,12 +267,8 @@ def traiter(m):
 
     # 1 bis. Cohérence entre pressions : DBP <= MAP <= SBP
     incoherences = []
-    sbp, pam, dbp = valeurs["sbp"], valeurs["map"], valeurs["dbp"]
-    if ((dbp is not None and pam is not None and dbp > pam)
-            or (pam is not None and sbp is not None and pam > sbp)
-            or (dbp is not None and sbp is not None and dbp > sbp)):
+    if pressions_incoherentes(valeurs["sbp"], valeurs["map"], valeurs["dbp"]):
         incoherences.append("pression")
-        stats["incoherents"] += 1
 
     # 2. Dernières valeurs connues (remises à zéro si le patient change)
     for param in PARAMS_NEWS2:

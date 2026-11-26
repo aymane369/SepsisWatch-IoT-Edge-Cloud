@@ -1,5 +1,5 @@
 """Tests hors ligne du calcul des variables."""
-from features import nettoyer, ajouter_mesure, calculer_variables, SIGNES
+from features import nettoyer, ajouter_mesure, calculer_variables, pressions_incoherentes, SIGNES
 
 
 def mesure(**valeurs):
@@ -73,8 +73,15 @@ def test_nombre_de_variables():
     v = calculer_variables(historique_de((1, mesure())), 1)
     assert len(v) == 45, len(v)
 
+def test_regle_des_pressions():
+    """Règle DBP <= MAP <= SBP : cas cohérents, incohérents et valeurs absentes"""
+    assert not pressions_incoherentes(120, 85, 70)
+    assert pressions_incoherentes(120, 85, 90)         # DBP > MAP
+    assert pressions_incoherentes(80, 85, 70)          # MAP > SBP
+    assert pressions_incoherentes(80, None, 90)        # DBP > SBP, MAP absente
+    assert not pressions_incoherentes(None, None, 90)  
 
-TESTS = [test_nettoyer_hors_bornes, test_nettoyer_pressions_incoherentes,
+TESTS = [test_regle_des_pressions,test_nettoyer_hors_bornes, test_nettoyer_pressions_incoherentes,
          test_fenetre_glissante, test_statistiques, test_age_et_delta_manquant,
          test_signe_jamais_mesure, test_variables_derivees,
          test_nombre_de_variables]

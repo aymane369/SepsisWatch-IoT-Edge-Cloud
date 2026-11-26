@@ -21,14 +21,19 @@ def nettoyer(mesure):
         v = mesure.get(s)
         mini, maxi = BORNES[s]
         valeurs[s] = v if v is not None and mini <= v <= maxi else None
-    sbp, pam, dbp = valeurs["sbp"], valeurs["map"], valeurs["dbp"]
-    if ((dbp is not None and pam is not None and dbp > pam)
-            or (pam is not None and sbp is not None and pam > sbp)
-            or (dbp is not None and sbp is not None and dbp > sbp)):
+    if pressions_incoherentes(valeurs["sbp"], valeurs["map"], valeurs["dbp"]):
         valeurs["map"] = None
         valeurs["dbp"] = None
     return valeurs
+def pressions_incoherentes(sbp, pam, dbp):
+    """Vrai si la règle physique DBP <= MAP <= SBP n'est pas respectée.
 
+    Une pression absente (None) n'est pas comparée. C'est le seul endroit où cette
+    règle est écrite : la passerelle et nettoyer() l'utilisent toutes les deux.
+    """
+    return ((dbp is not None and pam is not None and dbp > pam)
+            or (pam is not None and sbp is not None and pam > sbp)
+            or (dbp is not None and sbp is not None and dbp > sbp))
 
 def ajouter_mesure(historique, heure, valeurs):
     """Ajoute une heure de mesures et oublie celles qui sortent de la fenêtre."""
