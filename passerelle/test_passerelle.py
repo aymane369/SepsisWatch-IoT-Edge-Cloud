@@ -189,6 +189,15 @@ def test_message_donne_niveau_alerte():
     assert r["alerte"] == "nouvelle", r["alerte"]
     assert r["alerte_niveau"] == r["priorite"], (r["alerte_niveau"], r["priorite"])
 
+def test_message_en_retard_ancien_patient():
+    """Un message en retard du patient précédent n'efface pas la mémoire du nouveau"""
+    traiter(message(lit=5, patient="ancien", heure_sejour=10, timestamp="2026-11-20T10:00:00+00:00", **NORMAL))
+    traiter(message(lit=5, patient="nouveau", heure_sejour=1, timestamp="2026-11-20T10:00:05+00:00", **NORMAL))
+    traiter(message(lit=5, patient="nouveau", heure_sejour=2, timestamp="2026-11-20T10:00:10+00:00", **NORMAL))
+    r = traiter(message(lit=5, patient="ancien", heure_sejour=9, timestamp="2026-11-20T10:00:03+00:00", **NORMAL))
+    assert r is None, r
+    assert derniers[5]["patient_id"] == "nouveau", derniers[5]["patient_id"]
+    assert derniers[5]["derniere_heure"] == 2, derniers[5]["derniere_heure"]
 
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
@@ -199,7 +208,8 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_alerte_une_seule_fois, test_alerte_aggravation,
          test_alerte_oscillation, test_alerte_fin, test_alerte_rappel,
          test_persistance_pic_ignore, test_persistance_deux_heures,
-         test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte]
+         test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte,
+         test_message_en_retard_ancien_patient]
 
 if __name__ == "__main__":
     reussis = 0

@@ -178,7 +178,7 @@ stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
          "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0,
          "tampon_ecrits": 0, "tampon_renvoyes": 0, "tampon_perdus": 0,
          "apprentissages": 0, "heures_apprises": 0, "sorties_deja_apprises": 0,
-         "sorties_inconnues": 0, "sorties_invalides": 0, "sejours_oublies": 0}
+         "sorties_inconnues": 0, "sorties_invalides": 0, "sejours_oublies": 0,"anciens_patients": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
@@ -241,19 +241,23 @@ def traiter(m):
     valeurs = {}
 
     memoire = derniers.get(m["lit"])
+    if (memoire is not None and memoire["patient_id"] != m["patient_id"]
+            and est_plus_ancien(m.get("timestamp"), memoire["dernier_timestamp"])):
+        stats["anciens_patients"] += 1
+        return None
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
         memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
                                         "valeurs": {}, "derniere_heure": 0,
                                         "historique": [],
                                         "alerte_niveau": "aucune",
                                         "alerte_depuis": 0, "heures_calmes": 0,
-                                        "heures_au_dessus": 0}
+                                        "heures_au_dessus": 0, "dernier_timestamp": None}
     heure = m["heure_sejour"]
     if heure <= memoire["derniere_heure"]:
         stats["doublons"] += 1
         return None
     memoire["derniere_heure"] = heure
-
+    memoire["dernier_timestamp"] = m.get("timestamp")
     for param, (mini, maxi) in BORNES.items():
         v = m.get(param)
         if v is not None and not (mini <= v <= maxi):
@@ -327,7 +331,14 @@ def traiter(m):
         stats["alertes_" + m["alerte"]] += 1
     return m
 
+def est_plus_ancien(t1, t2):
+    """Vrai si l'horodatage t1 est antérieur à t2 (faux si l'un des deux manque ou est illisible)."""
+    try:
+        return datetime.fromisoformat(t1) < datetime.fromisoformat(t2)
+    except (TypeError, ValueError):
+        return False
 
+    
 def on_connect(client, userdata, flags, reason_code, properties):
     if flags.session_present:
         print(f"[passerelle-{SERVICE}] session reprise : les messages en attente vont arriver")
