@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
+from journal import enregistrer_sortie 
+enregistrer_sortie(__file__) 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "passerelle"))
 from passerelle import points, priorite, decider_alerte

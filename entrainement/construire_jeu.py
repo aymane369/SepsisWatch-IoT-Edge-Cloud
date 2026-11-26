@@ -6,7 +6,8 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-
+from journal import enregistrer_sortie 
+enregistrer_sortie(__file__) 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "passerelle"))
 from features import nettoyer, ajouter_mesure, calculer_variables
 

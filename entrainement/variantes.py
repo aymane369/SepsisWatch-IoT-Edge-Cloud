@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, average_precision_score
-
+from journal import enregistrer_sortie 
+enregistrer_sortie(__file__) 
 DOSSIER = Path(__file__).parent
 table = pd.read_csv(DOSSIER / "jeu_entrainement.csv")
 TOUTES = [c for c in table.columns if c not in ("patient_id", "sepsis")]

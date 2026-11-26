@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 import pandas as pd
 from sklearn.metrics import roc_auc_score, average_precision_score
-
+from journal import enregistrer_sortie 
+enregistrer_sortie(__file__) 
 RACINE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RACINE / "passerelle"))
 os.environ.setdefault("SERVICE", "1")  # sinon passerelle.py prend le 1er argument pour un numéro de service
