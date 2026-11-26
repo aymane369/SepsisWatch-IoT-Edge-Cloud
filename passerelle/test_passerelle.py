@@ -198,7 +198,22 @@ def test_message_en_retard_ancien_patient():
     assert r is None, r
     assert derniers[5]["patient_id"] == "nouveau", derniers[5]["patient_id"]
     assert derniers[5]["derniere_heure"] == 2, derniers[5]["derniere_heure"]
+def test_heure_sautee_signalee():
+    """Une heure sautée est signalée dans le message (heures_manquantes)"""
+    traiter(message(heure_sejour=1, **NORMAL))
+    r = traiter(message(heure_sejour=4, **NORMAL))
+    assert r["heures_manquantes"] == 2, r["heures_manquantes"]
 
+
+def test_trou_ne_compte_pas_comme_calme():
+    """Deux heures calmes, un trou, une heure calme : pas de fin, il faut 3 heures calmes observées de suite"""
+    memoire = {"alerte_niveau": "aucune", "alerte_depuis": 0,
+               "heures_calmes": 0, "heures_au_dessus": 0}
+    decider_alerte(memoire, "critique", 1)
+    decider_alerte(memoire, "aucune", 2)
+    decider_alerte(memoire, "aucune", 3)
+    r = decider_alerte(memoire, "aucune", 6, ecart=3, fin_heures=3)
+    assert r is None, r
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
@@ -209,7 +224,7 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_alerte_oscillation, test_alerte_fin, test_alerte_rappel,
          test_persistance_pic_ignore, test_persistance_deux_heures,
          test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte,
-         test_message_en_retard_ancien_patient]
+         test_message_en_retard_ancien_patient,test_heure_sautee_signalee, test_trou_ne_compte_pas_comme_calme]
 
 if __name__ == "__main__":
     reussis = 0

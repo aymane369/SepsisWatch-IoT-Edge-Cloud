@@ -131,8 +131,16 @@ def traiter_sortie(s):
 
 
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
-                   persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES):
-    """Renvoie 'nouvelle', 'rappel', 'fin' ou None selon l'état de l'alerte du patient."""
+                   persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1):
+    """Renvoie 'nouvelle', 'rappel', 'fin' ou None selon l'état de l'alerte du patient.
+
+    ecart : nombre d'heures depuis le message précédent du patient (1 si aucune heure n'a été perdue).
+    """
+    # Des heures manquent : on ne sait pas si elles étaient calmes ou anormales,
+    # donc les séries « de suite » repartent de zéro.
+    if ecart > 1:
+        memoire["heures_calmes"] = 0
+        memoire["heures_au_dessus"] = 0
     active = memoire["alerte_niveau"]
 
     # La situation s'aggrave : alerte si elle dure assez longtemps (critique : immédiate)
@@ -178,7 +186,7 @@ stats = {"recus": 0, "invalides": 0, "vides": 0, "valeurs_rejetees": 0,
          "sans_memoire": 0, "alertes_nouvelle": 0, "alertes_rappel": 0, "alertes_fin": 0,
          "tampon_ecrits": 0, "tampon_renvoyes": 0, "tampon_perdus": 0,
          "apprentissages": 0, "heures_apprises": 0, "sorties_deja_apprises": 0,
-         "sorties_inconnues": 0, "sorties_invalides": 0, "sejours_oublies": 0,"anciens_patients": 0}
+         "sorties_inconnues": 0, "sorties_invalides": 0, "sejours_oublies": 0,"anciens_patients": 0,"heures_manquantes": 0}
 cumul = {"reseau": 0.0, "traitement": 0.0}
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP")
@@ -256,6 +264,7 @@ def traiter(m):
     if heure <= memoire["derniere_heure"]:
         stats["doublons"] += 1
         return None
+    ecart = heure - memoire["derniere_heure"] if memoire["derniere_heure"] > 0 else 1
     memoire["derniere_heure"] = heure
     memoire["dernier_timestamp"] = m.get("timestamp")
     for param, (mini, maxi) in BORNES.items():
@@ -301,6 +310,8 @@ def traiter(m):
     m["incoherences"] = incoherences
     m["schema_version"] = SCHEMA_VERSION
     m["news2_nb_reprises"] = nb_reprises
+    m["heures_manquantes"] = ecart - 1
+    stats["heures_manquantes"] += ecart - 1
 
     # 4. Modèle Edge : risque de sepsis
     ajouter_mesure(memoire["historique"], heure, nettoyer(m))
@@ -323,7 +334,7 @@ def traiter(m):
 
     # 5. Priorité selon la grille
     m["priorite"] = priorite(niveau, alerte_modele)
-    m["alerte"] = decider_alerte(memoire, m["priorite"], heure)
+    m["alerte"] = decider_alerte(memoire, m["priorite"], heure, ecart=ecart)
     m["alerte_niveau"] = memoire["alerte_niveau"]  
     if m["priorite"] != "aucune":
         stats["sans_memoire"] += 1
