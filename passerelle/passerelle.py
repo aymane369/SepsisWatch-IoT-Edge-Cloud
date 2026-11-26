@@ -332,11 +332,12 @@ def traiter(m):
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
+    if flags.session_present:
+        print(f"[passerelle-{SERVICE}] session reprise : les messages en attente vont arriver")
     client.subscribe([(f"hopital/service-{SERVICE}/+/vitals", 1),
                       (f"hopital/service-{SERVICE}/+/sortie", 1)])
     client.publish(f"hopital/etat/passerelle-{SERVICE}", "en ligne", qos=1, retain=True)
     print(f"Passerelle {SERVICE} connectée")
-
 
 def on_message(client, userdata, msg):
     # Message de sortie : apprentissage, rien à republier
@@ -382,7 +383,9 @@ if __name__ == "__main__":
               f"{len(patients_appris)} patients déjà appris, {modele_en_ligne.nb_exemples} heures")
     else:
         print(f"[passerelle-{SERVICE}] modèle fixe")
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}")
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}",
+                         clean_session=False)
     client.will_set(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True)
     client.on_connect = on_connect
     client.on_message = on_message
