@@ -3,6 +3,7 @@ import sys
 import os
 import paho.mqtt.client as mqtt
 import time
+import signal
 from datetime import datetime
 import math
 from pathlib import Path
@@ -132,6 +133,18 @@ def traiter_sortie(s):
 
 
 
+def message_de_fin(patient_id, lit, timestamp, raison):
+    """Message « fin » pour Node-RED quand une alerte est fermée sans passer par les heures calmes."""
+    stats["alertes_fin"] += 1
+    return {"patient_id": patient_id, "service": SERVICE, "lit": lit,
+            "timestamp": timestamp, "alerte": "fin", "raison_fin": raison,
+            "priorite": "aucune", "alerte_niveau": "aucune",
+            "passerelle": SERVICE, "schema_version": SCHEMA_VERSION}
+
+
+fins_en_attente = []  # fins créées par traiter, publiées ensuite par on_message
+
+
 def fin_a_la_sortie(s):
     """Si le patient sort avec une alerte ouverte, la ferme et renvoie le message de fin à publier."""
     memoire = derniers.get(s.get("lit"))
@@ -139,12 +152,7 @@ def fin_a_la_sortie(s):
             or memoire["alerte_niveau"] == "aucune"):
         return None
     memoire.update(alerte_niveau="aucune", heures_calmes=0, heures_au_dessus=0)
-    stats["alertes_fin"] += 1
-    return {"patient_id": s["patient_id"], "service": SERVICE, "lit": s["lit"],
-            "timestamp": s.get("timestamp"), "alerte": "fin", "raison_fin": "sortie",
-            "priorite": "aucune", "alerte_niveau": "aucune",
-            "passerelle": SERVICE, "schema_version": SCHEMA_VERSION}
-
+    return message_de_fin(s["patient_id"], s["lit"], s.get("timestamp"), "sortie")
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
                    persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1,
                    news2_moyen=False, persistance_vigilance=PERSISTANCE_VIGILANCE):
@@ -266,10 +274,13 @@ derniere_sauvegarde = 0.0
 sauvegarde_active = False  # mise à True seulement quand la passerelle tourne vraiment (pas pendant les tests)
 
 
-def sauvegarder_memoire():
-    """Écrit la mémoire des lits et des séjours dans etat/, au plus toutes les SAUVEGARDE_SECONDES secondes."""
+def sauvegarder_memoire(forcer=False):
+    """Écrit la mémoire des lits et des séjours dans etat/, au plus toutes les SAUVEGARDE_SECONDES secondes.
+    forcer=True : écrit tout de suite (arrêt de la passerelle)."""
     global derniere_sauvegarde
-    if not sauvegarde_active or time.time() - derniere_sauvegarde < SAUVEGARDE_SECONDES:
+    if not sauvegarde_active:
+        return
+    if not forcer and time.time() - derniere_sauvegarde < SAUVEGARDE_SECONDES:
         return
     derniere_sauvegarde = time.time()
     DOSSIER_ETAT.mkdir(parents=True, exist_ok=True)
@@ -303,8 +314,11 @@ def traiter(m):
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
         precedent = None
         if memoire is not None:
-            # Nouveau patient dans le lit : on garde le séjour de celui qui vient de partir
-            # (sa sortie peut encore arriver) et on oublie celui d'avant. Au plus 2 séjours par lit.
+            # L'ancien patient avait une alerte ouverte et sa sortie n'est pas arrivée : on la ferme
+            if memoire["alerte_niveau"] != "aucune":
+                fins_en_attente.append(message_de_fin(memoire["patient_id"], m["lit"],
+                                                      m.get("timestamp"), "nouveau_patient"))
+            # Nouveau patient dans le lit : on garde le séjour ...   (inchangé)
             oublier_sejour(memoire.get("patient_precedent"))
             precedent = memoire["patient_id"]
         memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
@@ -433,6 +447,9 @@ def on_message(client, userdata, msg):
     try:
         m = json.loads(msg.payload)
         sortie = traiter(m)
+        while fins_en_attente:  # alerte d'un ancien patient fermée par traiter
+            fin = fins_en_attente.pop(0)
+            client.publish(f"hopital/service-{SERVICE}/lit-{fin['lit']:02d}/news2", json.dumps(fin), qos=2)
         if sortie is None:
             return
         emission = datetime.fromisoformat(sortie["timestamp"]).timestamp()
@@ -472,5 +489,28 @@ if __name__ == "__main__":
     client.will_set(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True)
     client.on_connect = on_connect
     client.on_message = on_message
+    arret_demande = False
+
+    def arreter(signum, frame):
+        """Docker demande l'arrêt (SIGTERM) : on lève seulement un drapeau, la boucle ci-dessous fait le reste."""
+        global arret_demande
+        arret_demande = True
+
+    signal.signal(signal.SIGTERM, arreter)
     client.connect(MQTT_HOST, 1883, keepalive=10)
-    client.loop_forever()
+    client.loop_start()  # MQTT tourne dans un fil à part, le programme principal attend l'arrêt
+    while not arret_demande:
+        time.sleep(0.5)
+
+    # Arrêt propre : annoncer le départ (le testament n'est pas envoyé si on se déconnecte proprement)
+    print(f"[passerelle-{SERVICE}] arrêt demandé")
+    try:
+        client.publish(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True).wait_for_publish(2)
+    except (RuntimeError, ValueError):
+        pass  # Mosquitto déjà injoignable : il enverra le testament lui-même
+    client.disconnect()
+    client.loop_stop()  # plus aucun message ne sera traité après cette ligne
+    sauvegarder_memoire(forcer=True)
+    if producteur is not None:
+        producteur.flush(5)  # derniers messages Kafka encore en route
+    print(f"[passerelle-{SERVICE}] mémoire sauvegardée, arrêt propre")

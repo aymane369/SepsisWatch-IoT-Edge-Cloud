@@ -1,8 +1,7 @@
 """Tests hors ligne de la passerelle : aucun MQTT, aucun Kafka."""
 import json
 from types import SimpleNamespace
-from passerelle import traiter, on_message, derniers, stats, priorite, decider_alerte, fin_a_la_sortie
-
+from passerelle import traiter, on_message, derniers, stats, priorite, decider_alerte, fin_a_la_sortie, fins_en_attente
 
 def message(lit=1, patient="ptest", **valeurs):
     """Fabrique un message de test, toutes les mesures absentes par défaut."""
@@ -235,6 +234,27 @@ def test_pas_de_fin_a_la_sortie_sans_alerte():
     """Un patient qui sort sans alerte ouverte ne déclenche rien"""
     traiter(message(lit=21, patient="pcalme", heure_sejour=1, **NORMAL))
     assert fin_a_la_sortie({"patient_id": "pcalme", "lit": 21, "etiquettes": [0]}) is None
+
+
+def test_fin_quand_nouveau_patient():
+    """Nouveau patient dans le lit alors que l'ancien avait une alerte ouverte : une fin est préparée"""
+    fins_en_attente.clear()
+    traiter(message(lit=24, patient="pa", heure_sejour=1, timestamp="2026-11-20T10:00:00+00:00", **NORMAL))
+    derniers[24]["alerte_niveau"] = "urgente"  # alerte ouverte, sortie jamais reçue
+    traiter(message(lit=24, patient="pb", heure_sejour=1, timestamp="2026-11-20T10:00:05+00:00", **NORMAL))
+    assert len(fins_en_attente) == 1, fins_en_attente
+    fin = fins_en_attente.pop()
+    assert fin["patient_id"] == "pa" and fin["raison_fin"] == "nouveau_patient", fin
+
+
+def test_pas_de_fin_quand_nouveau_patient_sans_alerte():
+    """Nouveau patient dans le lit, l'ancien sans alerte : aucune fin"""
+    fins_en_attente.clear()
+    traiter(message(lit=25, patient="pc", heure_sejour=1, timestamp="2026-11-20T10:00:00+00:00", **NORMAL))
+    traiter(message(lit=25, patient="pd", heure_sejour=1, timestamp="2026-11-20T10:00:05+00:00", **NORMAL))
+    assert fins_en_attente == [], fins_en_attente
+
+
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
@@ -246,7 +266,8 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_persistance_pic_ignore, test_persistance_deux_heures,
          test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte,
          test_message_en_retard_ancien_patient,test_heure_sautee_signalee, test_trou_ne_compte_pas_comme_calme,
-         test_news2_moyen_empeche_la_fin,test_fin_a_la_sortie, test_pas_de_fin_a_la_sortie_sans_alerte]
+         test_news2_moyen_empeche_la_fin,test_fin_a_la_sortie, test_pas_de_fin_a_la_sortie_sans_alerte,
+         test_fin_quand_nouveau_patient,test_pas_de_fin_quand_nouveau_patient_sans_alerte]
 
 if __name__ == "__main__":
     reussis = 0
