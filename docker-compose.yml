@@ -89,6 +89,7 @@ services:
       - MQTT_HOST=mosquitto
     volumes:
       - ./data:/app/data:ro
+      - ./etat:/app/etat
     depends_on:
       mosquitto:
         condition: service_healthy

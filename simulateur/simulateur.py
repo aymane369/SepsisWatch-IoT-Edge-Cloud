@@ -21,6 +21,32 @@ VITAUX = {"HR": "hr", "O2Sat": "o2sat", "Temp": "temp", "SBP": "sbp",
 fichiers = sorted(DOSSIER.glob("*.psv"))[15000:]
 prochain = 0
 
+CHEMIN_ETAT = Path("etat/simulateur.json")
+
+
+def sauvegarder_etat():
+    """Écrit, pour chaque lit, le patient et son heure, et le prochain fichier à admettre."""
+    etat = {"prochain": prochain, "sorties": sorties,
+            "lits": [{"patient_id": l["patient_id"], "heure": l["heure"]} for l in lits]}
+    CHEMIN_ETAT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CHEMIN_ETAT.with_suffix(".tmp")
+    tmp.write_text(json.dumps(etat), encoding="utf-8")
+    os.replace(tmp, CHEMIN_ETAT)
+
+
+def charger_etat():
+    """Relit l'état sauvegardé. Renvoie None si le fichier est absent ou abîmé."""
+    try:
+        etat = json.loads(CHEMIN_ETAT.read_text(encoding="utf-8"))
+        lits = [{"patient_id": l["patient_id"],
+                 "df": pd.read_csv(DOSSIER / f"{l['patient_id']}.psv", sep="|"),
+                 "heure": l["heure"]} for l in etat["lits"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if len(lits) != NB_LITS:
+        return None
+    return etat, lits
+
 
 def admettre(en_cours=False):
     """Charge le patient suivant dans un lit."""
@@ -47,15 +73,22 @@ def publier_sortie(i, lit):
     topic = f"hopital/service-{service}/lit-{i + 1:02d}/sortie"
     client.publish(topic, json.dumps(message), qos=1)
 
-
-lits = [admettre(en_cours=True) for _ in range(NB_LITS)]
+sorties = 0
+reprise = charger_etat()
+if reprise is None:
+    lits = [admettre(en_cours=True) for _ in range(NB_LITS)]
+    print(f"Démarrage : nouveaux patients dans les {NB_LITS} lits")
+else:
+    etat, lits = reprise
+    prochain = etat["prochain"]
+    sorties = etat["sorties"]
+    print(f"Reprise : {NB_LITS} lits rechargés, prochain fichier {prochain}")
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simulateur")
 client.connect(os.environ.get("MQTT_HOST", "localhost"), 1883)
 client.loop_start()
 
 tour = 0
-sorties = 0
 while True:
     for i in range(NB_LITS):
         if lits[i]["heure"] >= len(lits[i]["df"]):
@@ -83,4 +116,5 @@ while True:
 
     tour += 1
     print(f"Tour {tour} : {NB_LITS} messages publiés, {sorties} sorties au total")
+    sauvegarder_etat()  # après chaque tour : un redémarrage reprend les mêmes patients
     time.sleep(SECONDES_PAR_HEURE)
