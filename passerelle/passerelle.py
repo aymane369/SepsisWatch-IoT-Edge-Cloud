@@ -131,10 +131,13 @@ def traiter_sortie(s):
 
 
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
-                   persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1):
+                   persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1,
+                   news2_moyen=False):
     """Renvoie 'nouvelle', 'rappel', 'fin' ou None selon l'état de l'alerte du patient.
 
     ecart : nombre d'heures depuis le message précédent du patient (1 si aucune heure n'a été perdue).
+    
+    news2_moyen : vrai si le NEWS2 de l'heure est moyen. Une telle heure n'est pas « calme ».
     """
     # Des heures manquent : on ne sait pas si elles étaient calmes ou anormales,
     # donc les séries « de suite » repartent de zéro.
@@ -158,7 +161,7 @@ def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
         return None
 
     # Alerte en cours, patient revenu au calme : fin après fin_heures heures calmes
-    if prio == "aucune":
+    if prio == "aucune" and not news2_moyen:
         memoire["heures_calmes"] += 1
         if memoire["heures_calmes"] >= fin_heures:
             memoire.update(alerte_niveau="aucune", heures_calmes=0)
@@ -334,7 +337,8 @@ def traiter(m):
 
     # 5. Priorité selon la grille
     m["priorite"] = priorite(niveau, alerte_modele)
-    m["alerte"] = decider_alerte(memoire, m["priorite"], heure, ecart=ecart)
+    m["alerte"] = decider_alerte(memoire, m["priorite"], heure, ecart=ecart,
+                                 news2_moyen=(niveau == "moyen"))
     m["alerte_niveau"] = memoire["alerte_niveau"]  
     if m["priorite"] != "aucune":
         stats["sans_memoire"] += 1
