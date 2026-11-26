@@ -130,6 +130,20 @@ def traiter_sortie(s):
     stats["heures_apprises"] += n
 
 
+
+def fin_a_la_sortie(s):
+    """Si le patient sort avec une alerte ouverte, la ferme et renvoie le message de fin à publier."""
+    memoire = derniers.get(s.get("lit"))
+    if (memoire is None or memoire["patient_id"] != s["patient_id"]
+            or memoire["alerte_niveau"] == "aucune"):
+        return None
+    memoire.update(alerte_niveau="aucune", heures_calmes=0, heures_au_dessus=0)
+    stats["alertes_fin"] += 1
+    return {"patient_id": s["patient_id"], "service": SERVICE, "lit": s["lit"],
+            "timestamp": s.get("timestamp"), "alerte": "fin", "raison_fin": "sortie",
+            "priorite": "aucune", "alerte_niveau": "aucune",
+            "passerelle": SERVICE, "schema_version": SCHEMA_VERSION}
+
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
                    persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1,
                    news2_moyen=False):
@@ -365,12 +379,17 @@ def on_connect(client, userdata, flags, reason_code, properties):
 def on_message(client, userdata, msg):
     # Message de sortie : apprentissage, rien à republier
     if msg.topic.endswith("/sortie"):
+        fin = None
         try:
-            traiter_sortie(json.loads(msg.payload))
+            s = json.loads(msg.payload)
+            fin = fin_a_la_sortie(s)
+            traiter_sortie(s)
         except (ValueError, KeyError, TypeError):
             stats["sorties_invalides"] += 1
+        if fin is not None:
+            # alerte fermée parce que le patient est sorti : seulement pour Node-RED, pas pour Kafka
+            client.publish(f"hopital/service-{SERVICE}/lit-{fin['lit']:02d}/news2", json.dumps(fin), qos=2)
         return
-
     arrivee = time.time()
     stats["recus"] += 1
     try:

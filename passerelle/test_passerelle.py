@@ -1,7 +1,7 @@
 """Tests hors ligne de la passerelle : aucun MQTT, aucun Kafka."""
 import json
 from types import SimpleNamespace
-from passerelle import traiter, on_message, derniers, stats, priorite, decider_alerte
+from passerelle import traiter, on_message, derniers, stats, priorite, decider_alerte, fin_a_la_sortie
 
 
 def message(lit=1, patient="ptest", **valeurs):
@@ -223,7 +223,18 @@ def test_news2_moyen_empeche_la_fin():
     r += [decider_alerte(memoire, "aucune", h, news2_moyen=True, fin_heures=3) for h in (2, 3, 4)]
     r += [decider_alerte(memoire, "aucune", h, fin_heures=3) for h in (5, 6, 7)]
     assert r == ["nouvelle", None, None, None, None, None, "fin"], r
+def test_fin_a_la_sortie():
+    """Un patient qui sort avec une alerte ouverte reçoit une fin, raison « sortie »"""
+    traiter(message(lit=20, patient="psortie", heure_sejour=1, resp=26, o2sat=96, sbp=90, hr=135, temp=37.0))
+    fin = fin_a_la_sortie({"patient_id": "psortie", "lit": 20, "etiquettes": [0]})
+    assert fin is not None and fin["alerte"] == "fin" and fin["raison_fin"] == "sortie", fin
+    assert derniers[20]["alerte_niveau"] == "aucune", derniers[20]["alerte_niveau"]
 
+
+def test_pas_de_fin_a_la_sortie_sans_alerte():
+    """Un patient qui sort sans alerte ouverte ne déclenche rien"""
+    traiter(message(lit=21, patient="pcalme", heure_sejour=1, **NORMAL))
+    assert fin_a_la_sortie({"patient_id": "pcalme", "lit": 21, "etiquettes": [0]}) is None
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
          test_patient_sans_mesure, test_score_moyen, test_score_eleve,
@@ -235,7 +246,7 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_persistance_pic_ignore, test_persistance_deux_heures,
          test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte,
          test_message_en_retard_ancien_patient,test_heure_sautee_signalee, test_trou_ne_compte_pas_comme_calme,
-         test_news2_moyen_empeche_la_fin]
+         test_news2_moyen_empeche_la_fin,test_fin_a_la_sortie, test_pas_de_fin_a_la_sortie_sans_alerte]
 
 if __name__ == "__main__":
     reussis = 0
