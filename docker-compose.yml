@@ -69,12 +69,15 @@ services:
       - ./tampon:/app/tampon
       - ./etat:/app/etat
   nodered:
-    image: nodered/node-red:latest
+    image: nodered/node-red:5.0.9
     container_name: nodered
     ports:
       - "1880:1880"
+    environment:
+      - FLOWS=/data/projet/flows.json
     volumes:
       - nodered_data:/data
+      - ./nodered:/data/projet
     depends_on:
       mosquitto:
         condition: service_healthy
