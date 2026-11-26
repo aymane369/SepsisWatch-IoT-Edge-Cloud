@@ -6,7 +6,13 @@ services:
       - "1883:1883"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mosquitto_data:/mosquitto/data 
+      - mosquitto_data:/mosquitto/data
+    healthcheck:
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "sante/mosquitto", "-m", "ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 
   passerelle-1:
@@ -16,7 +22,8 @@ services:
       - SERVICE=1
       - MQTT_HOST=mosquitto
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
@@ -29,7 +36,8 @@ services:
       - SERVICE=2
       - MQTT_HOST=mosquitto
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
@@ -41,7 +49,8 @@ services:
       - SERVICE=3
       - MQTT_HOST=mosquitto
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
@@ -53,7 +62,8 @@ services:
       - SERVICE=4
       - MQTT_HOST=mosquitto
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./tampon:/app/tampon
@@ -66,7 +76,8 @@ services:
     volumes:
       - nodered_data:/data
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
   simulateur:
     build: ./simulateur
@@ -76,8 +87,11 @@ services:
     volumes:
       - ./data:/app/data:ro
     depends_on:
-      - mosquitto
+      mosquitto:
+        condition: service_healthy
     restart: unless-stopped
 volumes:
   nodered_data:
   mosquitto_data:
+
+
