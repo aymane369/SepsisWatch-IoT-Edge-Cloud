@@ -17,6 +17,7 @@ AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
 RAPPEL_HEURES = int(os.environ.get("RAPPEL_HEURES", "6"))
 FIN_HEURES = int(os.environ.get("FIN_HEURES", "3"))
 PERSISTANCE_HEURES = int(os.environ.get("PERSISTANCE_HEURES", "1"))
+PERSISTANCE_VIGILANCE = int(os.environ.get("PERSISTANCE_VIGILANCE", "1"))
 ORDRE_PRIORITE = {"aucune": 0, "vigilance": 1, "urgente": 2, "critique": 3}
 PARAMS_NEWS2 = ["resp", "o2sat", "sbp", "hr", "temp"]
 
@@ -146,7 +147,7 @@ def fin_a_la_sortie(s):
 
 def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
                    persistance=PERSISTANCE_HEURES, rappel_heures=RAPPEL_HEURES, ecart=1,
-                   news2_moyen=False):
+                   news2_moyen=False, persistance_vigilance=PERSISTANCE_VIGILANCE):
     """Renvoie 'nouvelle', 'rappel', 'fin' ou None selon l'état de l'alerte du patient.
 
     ecart : nombre d'heures depuis le message précédent du patient (1 si aucune heure n'a été perdue).
@@ -164,7 +165,8 @@ def decider_alerte(memoire, prio, heure, fin_heures=FIN_HEURES,
     if ORDRE_PRIORITE[prio] > ORDRE_PRIORITE[active]:
         memoire["heures_au_dessus"] += 1
         memoire["heures_calmes"] = 0
-        if prio == "critique" or memoire["heures_au_dessus"] >= persistance:
+        besoin = max(persistance, persistance_vigilance) if prio == "vigilance" else persistance
+        if prio == "critique" or memoire["heures_au_dessus"] >= besoin:
             memoire.update(alerte_niveau=prio, alerte_depuis=heure, heures_au_dessus=0)
             return "nouvelle"
         return None

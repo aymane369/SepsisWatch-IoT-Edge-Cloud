@@ -32,32 +32,44 @@ z = modele["intercept"] + X[V].to_numpy() @ np.array([modele["coefficients"][v] 
 proba = 1 / (1 + np.exp(-z))
 
 prios = []
+niveaux = []
 for ligne, p in zip(val[[f"{x}_dernier" for x in PARAMS_NEWS2]].itertuples(index=False), proba):
     pts = [points(n, v) for n, v in zip(PARAMS_NEWS2, ligne) if pd.notna(v)]
     s = sum(pts)
     niveau = ("indetermine" if len(pts) < 3 else "eleve" if s >= 7
               else "moyen" if s >= 5 or 3 in pts else "faible")
+    niveaux.append(niveau)
     prios.append(priorite(niveau, p >= modele["seuil"]))
 val["prio"] = prios
+val["niveau"] = niveaux
 
-groupes = [(g["heure_sejour"].to_numpy(), g["prio"].to_numpy(), g["sepsis"].to_numpy())
+groupes = [(g["heure_sejour"].to_numpy(), g["prio"].to_numpy(), g["sepsis"].to_numpy(),
+            g["niveau"].to_numpy())
            for _, g in val.groupby("patient_id", sort=False)]
 jours = len(val) / 24
 
 
 # 3. Rejouer chaque patient heure par heure avec un réglage donné
-def rejouer(persistance, fin, avec_memoire=True):
+def rejouer(persistance, fin, avec_memoire=True, nouvelles_regles=True, pers_vig=1):
     alertes = fins = 0
     sepsis_total = sepsis_detectes = sans_sepsis = faux = 0
     retards = []
-    for heures, prs, ys in groupes:
+    for heures, prs, ys, nivs in groupes:
         memoire = {"alerte_niveau": "aucune", "alerte_depuis": 0,
                    "heures_calmes": 0, "heures_au_dessus": 0}
         detecte = alerte_patient = False
         premiere_prio = premiere_alerte = None
-        for h, pr, y in zip(heures, prs, ys):
+        precedente = 0
+        for h, pr, y, nv in zip(heures, prs, ys, nivs):
+            ecart = int(h) - precedente if precedente > 0 else 1
+            precedente = int(h)
             if avec_memoire:
-                d = decider_alerte(memoire, pr, int(h), fin_heures=fin, persistance=persistance)
+                if nouvelles_regles:
+                    d = decider_alerte(memoire, pr, int(h), fin_heures=fin, persistance=persistance,
+                                       ecart=ecart, news2_moyen=(nv == "moyen"),
+                                       persistance_vigilance=pers_vig)
+                else:
+                    d = decider_alerte(memoire, pr, int(h), fin_heures=fin, persistance=persistance)
                 en_alerte = memoire["alerte_niveau"] != "aucune"
                 envoyee = d in ("nouvelle", "rappel")
                 fins += d == "fin"
@@ -90,6 +102,9 @@ def afficher(nom, r):
 print(f"{'Réglage':26} | alertes/j | fins/j  | sepsis    | sans sepsis  | retard")
 print(f"{'':26} | par pat.  | par pat.| détectés  | alertés      | (h)")
 afficher("Sans mémoire", rejouer(1, 2, avec_memoire=False))
+afficher("ancien : pers. 1, fin 3 h", rejouer(1, 3, nouvelles_regles=False))
+afficher("vigilance 2 h, fin 3 h", rejouer(1, 3, pers_vig=2))
+afficher("vigilance 3 h, fin 3 h", rejouer(1, 3, pers_vig=3))
 for persistance in (1, 2):
     for fin in (2, 3, 4):
         afficher(f"persistance {persistance}, fin {fin} h", rejouer(persistance, fin))
