@@ -69,7 +69,23 @@ def test_heures_hors_liste_ignorees():
     passerelle.traiter_sortie({"patient_id": "pt-d", "etiquettes": [0, 0]})  # liste plus courte
     assert passerelle.modele_en_ligne.nb_exemples == avant + 2
 
-
+def test_memoire_sauvegardee_et_rechargee():
+    sejour("pt-memo", 17, 3)
+    passerelle.derniers[17]["alerte_niveau"] = "urgente"
+    passerelle.sauvegarde_active = True
+    passerelle.derniere_sauvegarde = 0.0
+    passerelle.sauvegarder_memoire()
+    passerelle.sauvegarde_active = False
+    passerelle.derniers.clear()  # comme un redémarrage : la mémoire vive est vide
+    passerelle.sejours.clear()
+    passerelle.charger_memoire()
+    assert passerelle.derniers[17]["alerte_niveau"] == "urgente"
+    assert passerelle.derniers[17]["derniere_heure"] == 3
+    assert sorted(passerelle.sejours["pt-memo"]) == [1, 2, 3]
+    avant = passerelle.stats["doublons"]
+    sejour("pt-memo", 17, 3)  # les heures 1 à 3 renvoyées : reconnues comme doublons
+    assert passerelle.stats["doublons"] == avant + 3
+    
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0

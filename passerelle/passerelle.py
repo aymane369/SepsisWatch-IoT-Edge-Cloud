@@ -65,7 +65,8 @@ DOSSIER_ETAT = Path(os.environ.get("DOSSIER_ETAT", Path(__file__).parent / "etat
 CHEMIN_MODELE_EN_LIGNE = DOSSIER_ETAT / f"modele_en_ligne-{SERVICE}.json"
 CHEMIN_PATIENTS_APPRIS = DOSSIER_ETAT / f"patients_appris-{SERVICE}.txt"
 SEJOURS_MAX = 200  # séjours gardés en attente de leur message de sortie
-
+CHEMIN_MEMOIRE = DOSSIER_ETAT / f"memoire-{SERVICE}.json"
+SAUVEGARDE_SECONDES = int(os.environ.get("SAUVEGARDE_SECONDES", "10"))
 
 def charger_patients_appris():
     if not CHEMIN_PATIENTS_APPRIS.exists():
@@ -262,6 +263,34 @@ def vider_tampon_si_possible():
         stats["tampon_renvoyes"] += n
         print(f"[passerelle-{SERVICE}] {n} messages du tampon renvoyés à Kafka")
 
+derniere_sauvegarde = 0.0
+sauvegarde_active = False  # mise à True seulement quand la passerelle tourne vraiment (pas pendant les tests)
+
+
+def sauvegarder_memoire():
+    """Écrit la mémoire des lits et des séjours dans etat/, au plus toutes les SAUVEGARDE_SECONDES secondes."""
+    global derniere_sauvegarde
+    if not sauvegarde_active or time.time() - derniere_sauvegarde < SAUVEGARDE_SECONDES:
+        return
+    derniere_sauvegarde = time.time()
+    DOSSIER_ETAT.mkdir(parents=True, exist_ok=True)
+    tmp = CHEMIN_MEMOIRE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"derniers": derniers, "sejours": sejours}), encoding="utf-8")
+    os.replace(tmp, CHEMIN_MEMOIRE)
+
+
+def charger_memoire():
+    """Relit la mémoire sauvegardée. Fichier absent ou abîmé : on garde une mémoire vide."""
+    try:
+        contenu = json.loads(CHEMIN_MEMOIRE.read_text(encoding="utf-8"))
+        # JSON écrit les clés numériques en texte : on les remet en nombres
+        lits = {int(lit): fiche for lit, fiche in contenu["derniers"].items()}
+        attente = {pid: {int(h): v for h, v in heures.items()}
+                   for pid, heures in contenu["sejours"].items()}
+    except (OSError, ValueError, KeyError, AttributeError):
+        return
+    derniers.update(lits)
+    sejours.update(attente)
 
 def traiter(m):
     valeurs_rejetees = []
@@ -379,6 +408,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Passerelle {SERVICE} connectée")
 
 def on_message(client, userdata, msg):
+    sauvegarder_memoire()
     # Message de sortie : apprentissage, rien à republier
     if msg.topic.endswith("/sortie"):
         fin = None
@@ -427,7 +457,10 @@ if __name__ == "__main__":
               f"{len(patients_appris)} patients déjà appris, {modele_en_ligne.nb_exemples} heures")
     else:
         print(f"[passerelle-{SERVICE}] modèle fixe")
-
+    
+    charger_memoire()
+    sauvegarde_active = True
+    print(f"[passerelle-{SERVICE}] mémoire rechargée : {len(derniers)} lits, {len(sejours)} séjours en cours")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}",
                          clean_session=False)
     client.will_set(f"hopital/etat/passerelle-{SERVICE}", "hors ligne", qos=1, retain=True)
