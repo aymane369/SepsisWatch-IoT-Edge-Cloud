@@ -4,6 +4,7 @@ import os
 import paho.mqtt.client as mqtt
 import time
 import signal
+import threading
 from datetime import datetime
 import math
 from pathlib import Path
@@ -260,9 +261,13 @@ def envoyer_kafka(cle, valeur):
         mettre_en_tampon(cle, valeur)
 
 
+verrou_kafka = threading.Lock()  # Kafka est utilisé par deux fils : celui de MQTT et la boucle principale
+
+
 def vider_tampon_si_possible():
+    """Renvoie le tampon à Kafka : toutes les 5 s si Kafka répond, sinon un essai toutes les 30 s."""
     global dernier_vidage
-    if not kafka_ok or time.time() - dernier_vidage < 5:
+    if time.time() - dernier_vidage < (5 if kafka_ok else 30):
         return
     dernier_vidage = time.time()
     n = tampon.vider(CHEMIN_TAMPON, envoyer_kafka)
@@ -465,9 +470,10 @@ def on_message(client, userdata, msg):
     topic = f"hopital/service-{SERVICE}/lit-{sortie['lit']:02d}/news2"
     client.publish(topic, json.dumps(sortie), qos=2)
     if producteur is not None:
-        envoyer_kafka(sortie["patient_id"], json.dumps(sortie))
-        producteur.poll(0)
-        vider_tampon_si_possible()
+        with verrou_kafka:
+            envoyer_kafka(sortie["patient_id"], json.dumps(sortie))
+            producteur.poll(0)
+            vider_tampon_si_possible()
     if stats["recus"] % 100 == 0:
         n = stats["recus"] - stats["invalides"]
         print(stats, f"latence moy {cumul['reseau'] / n:.1f} ms,",
@@ -501,6 +507,11 @@ if __name__ == "__main__":
     client.loop_start()  # MQTT tourne dans un fil à part, le programme principal attend l'arrêt
     while not arret_demande:
         time.sleep(0.5)
+        if producteur is not None:
+            # même sans nouveau message : lire les réponses de Kafka et vider le tampon
+            with verrou_kafka:
+                producteur.poll(0)
+                vider_tampon_si_possible()
 
     # Arrêt propre : annoncer le départ (le testament n'est pas envoyé si on se déconnecte proprement)
     print(f"[passerelle-{SERVICE}] arrêt demandé")
@@ -512,5 +523,10 @@ if __name__ == "__main__":
     client.loop_stop()  # plus aucun message ne sera traité après cette ligne
     sauvegarder_memoire(forcer=True)
     if producteur is not None:
-        producteur.flush(5)  # derniers messages Kafka encore en route
+        reste = producteur.flush(5)  # derniers messages Kafka encore en route
+        if reste:
+            # Kafka n'a pas répondu à temps : on annule ces envois, et rapport_kafka les range dans le tampon
+            producteur.purge()
+            producteur.flush(1)
+            print(f"[passerelle-{SERVICE}] {reste} messages non confirmés mis dans le tampon")
     print(f"[passerelle-{SERVICE}] mémoire sauvegardée, arrêt propre")

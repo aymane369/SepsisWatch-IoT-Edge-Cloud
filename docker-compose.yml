@@ -25,9 +25,11 @@ services:
       mosquitto:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./tampon:/app/tampon
       - ./etat:/app/etat
+    
 
   passerelle-2:
     build: ./passerelle
@@ -39,6 +41,7 @@ services:
       mosquitto:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./tampon:/app/tampon
       - ./etat:/app/etat
@@ -52,6 +55,7 @@ services:
       mosquitto:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./tampon:/app/tampon
       - ./etat:/app/etat
@@ -65,6 +69,7 @@ services:
       mosquitto:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./tampon:/app/tampon
       - ./etat:/app/etat
