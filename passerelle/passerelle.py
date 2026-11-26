@@ -64,7 +64,6 @@ APPRENTISSAGE = os.environ.get("APPRENTISSAGE", "1") == "1" and modele is not No
 DOSSIER_ETAT = Path(os.environ.get("DOSSIER_ETAT", Path(__file__).parent / "etat"))
 CHEMIN_MODELE_EN_LIGNE = DOSSIER_ETAT / f"modele_en_ligne-{SERVICE}.json"
 CHEMIN_PATIENTS_APPRIS = DOSSIER_ETAT / f"patients_appris-{SERVICE}.txt"
-SEJOURS_MAX = 200  # séjours gardés en attente de leur message de sortie
 CHEMIN_MEMOIRE = DOSSIER_ETAT / f"memoire-{SERVICE}.json"
 SAUVEGARDE_SECONDES = int(os.environ.get("SAUVEGARDE_SECONDES", "10"))
 
@@ -96,13 +95,13 @@ def predire_en_ligne(variables):
 
 def garder_variables(patient_id, heure, variables):
     """Garde les variables de chaque heure du patient jusqu'à son message de sortie."""
-    if patient_id not in sejours:
-        if len(sejours) >= SEJOURS_MAX:
-            del sejours[next(iter(sejours))]  # le plus ancien : sa sortie n'est jamais arrivée
-            stats["sejours_oublies"] += 1
-        sejours[patient_id] = {}
-    sejours[patient_id][heure] = variables
+    sejours.setdefault(patient_id, {})[heure] = variables
 
+
+def oublier_sejour(patient_id):
+    """Supprime le séjour d'un patient parti depuis deux admissions, dont la sortie n'est jamais arrivée."""
+    if patient_id is not None and sejours.pop(patient_id, None) is not None:
+        stats["sejours_oublies"] += 1
 
 def traiter_sortie(s):
     """Fin de séjour : le modèle apprend des heures du patient que la passerelle a vues."""
@@ -302,7 +301,14 @@ def traiter(m):
         stats["anciens_patients"] += 1
         return None
     if memoire is None or memoire["patient_id"] != m["patient_id"]:
+        precedent = None
+        if memoire is not None:
+            # Nouveau patient dans le lit : on garde le séjour de celui qui vient de partir
+            # (sa sortie peut encore arriver) et on oublie celui d'avant. Au plus 2 séjours par lit.
+            oublier_sejour(memoire.get("patient_precedent"))
+            precedent = memoire["patient_id"]
         memoire = derniers[m["lit"]] = {"patient_id": m["patient_id"],
+                                        "patient_precedent": precedent,
                                         "valeurs": {}, "derniere_heure": 0,
                                         "historique": [],
                                         "alerte_niveau": "aucune",

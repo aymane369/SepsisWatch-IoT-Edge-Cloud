@@ -85,7 +85,15 @@ def test_memoire_sauvegardee_et_rechargee():
     avant = passerelle.stats["doublons"]
     sejour("pt-memo", 17, 3)  # les heures 1 à 3 renvoyées : reconnues comme doublons
     assert passerelle.stats["doublons"] == avant + 3
-    
+def test_deux_sejours_par_lit():
+    avant = passerelle.stats["sejours_oublies"]
+    sejour("pt-lit-a", 18, 2)  # trois patients se suivent dans le lit 18, aucune sortie n'arrive
+    sejour("pt-lit-b", 18, 2)
+    assert "pt-lit-a" in passerelle.sejours  # sa sortie peut encore arriver
+    sejour("pt-lit-c", 18, 2)
+    assert "pt-lit-a" not in passerelle.sejours  # parti depuis deux admissions : oublié
+    assert "pt-lit-b" in passerelle.sejours and "pt-lit-c" in passerelle.sejours
+    assert passerelle.stats["sejours_oublies"] == avant + 1   
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0
