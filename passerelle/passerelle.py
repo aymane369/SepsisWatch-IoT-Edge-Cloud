@@ -12,7 +12,7 @@ from apprentissage import ModeleEnLigne, REGLAGES_RETENUS
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
-SCHEMA_VERSION = 3  # 3 : ajout des champs "modele" et "modele_nb_patients"
+SCHEMA_VERSION = 4 
 AGE_MAX_HEURES = int(os.environ.get("AGE_MAX_HEURES", "6"))
 RAPPEL_HEURES = int(os.environ.get("RAPPEL_HEURES", "6"))
 FIN_HEURES = int(os.environ.get("FIN_HEURES", "3"))
@@ -324,6 +324,7 @@ def traiter(m):
     # 5. Priorité selon la grille
     m["priorite"] = priorite(niveau, alerte_modele)
     m["alerte"] = decider_alerte(memoire, m["priorite"], heure)
+    m["alerte_niveau"] = memoire["alerte_niveau"]  
     if m["priorite"] != "aucune":
         stats["sans_memoire"] += 1
     if m["alerte"] is not None:

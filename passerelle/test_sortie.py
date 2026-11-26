@@ -24,7 +24,7 @@ def test_le_message_indique_le_modele():
                             "hr": 80.0, "o2sat": 98.0, "temp": 37.0, "sbp": 120.0,
                             "map": 85.0, "dbp": 70.0, "resp": 16.0})
     assert m["modele"] == "en_ligne"
-    assert m["schema_version"] == 3
+    assert m["schema_version"] == 4
     assert 0.0 < m["risque_edge"] < 1.0
 
 

@@ -113,7 +113,7 @@ def test_risque_calcule():
     assert 0 <= r["risque_edge"] <= 1, r["risque_edge"]
     assert isinstance(r["risque_explication"], list), r["risque_explication"]
     assert r["priorite"] in ("critique", "urgente", "vigilance", "aucune"), r["priorite"]
-    assert r["schema_version"] == 3, r["schema_version"]
+    assert r["schema_version"] == 4, r["schema_version"]
 
 
 def test_grille_priorite():
@@ -183,6 +183,12 @@ def test_fin_plus_longue():
     r = sequence("critique", "aucune", "aucune", "aucune", fin_heures=3)
     assert r == ["nouvelle", None, None, "fin"], r
 
+def test_message_donne_niveau_alerte():
+    """Le message indique le niveau de l'alerte en cours (alerte_niveau)"""
+    r = traiter(message(heure_sejour=1, resp=26, o2sat=96, sbp=90, hr=135, temp=37.0))
+    assert r["alerte"] == "nouvelle", r["alerte"]
+    assert r["alerte_niveau"] == r["priorite"], (r["alerte_niveau"], r["priorite"])
+
 
 TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_pression_incoherente, test_pression_coherente,
@@ -193,7 +199,7 @@ TESTS = [test_valeur_hors_bornes, test_valeur_rejetee_exclue_du_score,
          test_alerte_une_seule_fois, test_alerte_aggravation,
          test_alerte_oscillation, test_alerte_fin, test_alerte_rappel,
          test_persistance_pic_ignore, test_persistance_deux_heures,
-         test_persistance_critique_immediate, test_fin_plus_longue]
+         test_persistance_critique_immediate, test_fin_plus_longue,test_message_donne_niveau_alerte]
 
 if __name__ == "__main__":
     reussis = 0
