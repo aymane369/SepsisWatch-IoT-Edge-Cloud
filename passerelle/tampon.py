@@ -52,15 +52,9 @@ def vider(chemin, envoyer):
 def terminer_envoi(chemin):
     """Supprime le fichier .envoi : Kafka a répondu pour tous les messages renvoyés."""
     Path(chemin).with_suffix(".envoi").unlink(missing_ok=True)
-    """Renvoie chaque message du tampon avec envoyer(cle, valeur). Renvoie le nombre de messages relus."""
-    chemin = Path(chemin)
-    en_cours = chemin.with_suffix(".envoi")
-    n = 0
-    # un fichier .envoi qui existe encore vient d'un arrêt pendant un renvoi précédent
-    if en_cours.exists():
-        n += _relire(en_cours, envoyer)
-    if chemin.exists():
-        # on renomme d'abord : les échecs pendant le renvoi repartent dans un nouveau tampon
-        os.replace(chemin, en_cours)
-        n += _relire(en_cours, envoyer)
+
+def deplacer(source, chemin):
+    """Recopie à la fin du tampon les messages d'un autre fichier, puis supprime ce fichier."""
+    n = _relire(source, lambda cle, valeur: ecrire(chemin, cle, valeur))
+    Path(source).unlink()
     return n

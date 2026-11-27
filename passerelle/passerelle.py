@@ -253,13 +253,49 @@ def mettre_en_tampon(cle, valeur):
         stats["tampon_perdus"] += 1   # tampon plein
 
 
-def envoyer_kafka(cle, valeur):
-    try:
-        producteur.produce(KAFKA_TOPIC, key=cle, value=valeur, on_delivery=rapport_kafka)
-    except BufferError:
-        # file d'attente du producteur pleine : directement sur disque
-        mettre_en_tampon(cle, valeur)
+JOURNAL_SECONDES = 5  # un nouveau morceau de journal toutes les 5 s
+journal_en_attente = {}  # morceau du journal -> nombre de ses messages qui attendent leur accusé
 
+
+def morceau_du_journal():
+    return DOSSIER_TAMPON / f"journal-{SERVICE}-{int(time.time() // JOURNAL_SECONDES)}.jsonl"
+
+
+def liberer_journal(tout=False):
+    """Supprime les morceaux du journal dont tous les messages ont reçu leur accusé.
+    Le morceau en cours d'écriture est gardé, sauf à l'arrêt (tout=True)."""
+    courant = morceau_du_journal()
+    for morceau, n in list(journal_en_attente.items()):
+        if n == 0 and (tout or morceau != courant):
+            morceau.unlink(missing_ok=True)
+            del journal_en_attente[morceau]
+
+
+def rapport_journal(err, msg, morceau):
+    rapport_kafka(err, msg)  # arrivé dans Kafka, ou échec rangé dans le tampon : en sécurité
+    journal_en_attente[morceau] -= 1
+    liberer_journal()
+
+
+def envoyer_kafka(cle, valeur):
+    morceau = morceau_du_journal()
+    tampon.ecrire(morceau, cle, valeur)  # d'abord une copie sur le disque
+    journal_en_attente[morceau] = journal_en_attente.get(morceau, 0) + 1
+    try:
+        producteur.produce(KAFKA_TOPIC, key=cle, value=valeur,
+                           on_delivery=lambda err, msg: rapport_journal(err, msg, morceau))
+    except BufferError:
+        # file d'attente du producteur pleine : directement dans le tampon
+        mettre_en_tampon(cle, valeur)
+        journal_en_attente[morceau] -= 1
+
+
+def reprendre_journal():
+    """Morceaux restés après un plantage : on ne sait pas ce que Kafka a reçu, ils passent au tampon."""
+    n = 0
+    for morceau in sorted(DOSSIER_TAMPON.glob(f"journal-{SERVICE}-*.jsonl")):
+        n += tampon.deplacer(morceau, CHEMIN_TAMPON)
+    return n
 
 verrou_kafka = threading.Lock()  # Kafka est utilisé par deux fils : celui de MQTT et la boucle principale
 envoi_en_attente = 0  # messages renvoyés depuis le tampon qui attendent encore la réponse de Kafka
@@ -508,6 +544,11 @@ if __name__ == "__main__":
         print(f"[passerelle-{SERVICE}] modèle fixe")
     
     charger_memoire()
+    if producteur is not None:
+        n = reprendre_journal()
+        if n:
+            print(f"[passerelle-{SERVICE}] {n} messages du journal repris dans le tampon")
+    sauvegarde_active = True
     sauvegarde_active = True
     print(f"[passerelle-{SERVICE}] mémoire rechargée : {len(derniers)} lits, {len(sejours)} séjours en cours")
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"passerelle-{SERVICE}",
@@ -532,6 +573,7 @@ if __name__ == "__main__":
             with verrou_kafka:
                 producteur.poll(0)
                 vider_tampon_si_possible()
+                liberer_journal()
 
     # Arrêt propre : annoncer le départ (le testament n'est pas envoyé si on se déconnecte proprement)
     print(f"[passerelle-{SERVICE}] arrêt demandé")
@@ -549,4 +591,5 @@ if __name__ == "__main__":
             producteur.purge()
             producteur.flush(1)
             print(f"[passerelle-{SERVICE}] {reste} messages non confirmés mis dans le tampon")
-    print(f"[passerelle-{SERVICE}] mémoire sauvegardée, arrêt propre")
+            print(f"[passerelle-{SERVICE}] mémoire sauvegardée, arrêt propre")
+        liberer_journal(tout=True) 

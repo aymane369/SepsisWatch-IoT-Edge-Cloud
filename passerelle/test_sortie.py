@@ -135,6 +135,35 @@ def test_tampon_garde_jusqu_a_confirmation():
         assert not envoi.exists()  # tout est confirmé : fichier supprimé
     finally:
         passerelle.producteur = None
+
+
+def test_journal_garde_jusqu_a_confirmation():
+    faux = FauxProducteur()
+    passerelle.producteur = faux
+    try:
+        passerelle.envoyer_kafka("p1", '{"a": 1}')
+        morceau = next(iter(passerelle.journal_en_attente))
+        assert morceau.exists()  # une copie sur le disque avant l'envoi
+        passerelle.liberer_journal(tout=True)
+        assert morceau.exists()  # pas encore confirmé : on la garde
+        rapport, cle, valeur = faux.envois[0]
+        rapport(None, FauxMessage(cle, valeur))  # Kafka confirme
+        passerelle.liberer_journal(tout=True)
+        assert not morceau.exists()  # confirmé : copie supprimée
+    finally:
+        passerelle.producteur = None
+        passerelle.journal_en_attente.clear()
+
+
+def test_journal_repris_au_demarrage():
+    reste = passerelle.DOSSIER_TAMPON / f"journal-{passerelle.SERVICE}-1.jsonl"
+    tampon.ecrire(reste, "p9", '{"a": 9}')  # morceau laissé par un plantage
+    assert passerelle.reprendre_journal() == 1
+    assert not reste.exists()
+    recus = []
+    tampon.vider(passerelle.CHEMIN_TAMPON, lambda c, v: recus.append(c))
+    tampon.terminer_envoi(passerelle.CHEMIN_TAMPON)
+    assert recus == ["p9"]  # il attend dans le tampon, prêt à être renvoyé
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0
