@@ -1,0 +1,47 @@
+# Qui a le droit de publier (write) et de lire (read) quoi.
+# Tout ce qui n'est pas écrit ici est interdit.
+
+# Simulateur : publie les mesures, les sorties et son état
+user simulateur
+topic write hopital/+/+/vitals
+topic write hopital/+/+/sortie
+topic write hopital/etat/simulateur
+
+# Passerelles : chacune ne lit que son service et ne publie que pour lui
+user passerelle-1
+topic read hopital/service-1/+/vitals
+topic read hopital/service-1/+/sortie
+topic write hopital/service-1/+/news2
+topic write hopital/etat/passerelle-1
+
+user passerelle-2
+topic read hopital/service-2/+/vitals
+topic read hopital/service-2/+/sortie
+topic write hopital/service-2/+/news2
+topic write hopital/etat/passerelle-2
+
+user passerelle-3
+topic read hopital/service-3/+/vitals
+topic read hopital/service-3/+/sortie
+topic write hopital/service-3/+/news2
+topic write hopital/etat/passerelle-3
+
+user passerelle-4
+topic read hopital/service-4/+/vitals
+topic read hopital/service-4/+/sortie
+topic write hopital/service-4/+/news2
+topic write hopital/etat/passerelle-4
+
+# Node-RED : lit les décisions et les états, publie les alertes
+user nodered
+topic read hopital/+/+/news2
+topic read hopital/etat/#
+topic write hopital/alertes/#
+
+# Contrôle de santé de Docker
+user sante
+topic write sante/mosquitto
+
+# Administration : lecture seule de tout, pour surveiller et faire les démonstrations
+user admin
+topic read hopital/#

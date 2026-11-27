@@ -579,6 +579,7 @@ if __name__ == "__main__":
         arret_demande = True
 
     signal.signal(signal.SIGTERM, arreter)
+    client.username_pw_set(f"passerelle-{SERVICE}", os.environ.get("MQTT_MDP"))
     client.connect(MQTT_HOST, 1883, keepalive=20)  # 30 s sans nouvelles avant qu'on la croie partie
     client.loop_start()  # MQTT tourne dans un fil à part, le programme principal attend l'arrêt
     while not arret_demande:

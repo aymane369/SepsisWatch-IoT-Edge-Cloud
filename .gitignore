@@ -8,3 +8,5 @@ etat/
 passerelle/etat/
 nodered/.*.backup
 .env
+mosquitto/config/passwd
+nodered/flows_cred.json
