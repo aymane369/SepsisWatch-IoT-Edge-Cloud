@@ -262,15 +262,35 @@ def envoyer_kafka(cle, valeur):
 
 
 verrou_kafka = threading.Lock()  # Kafka est utilisé par deux fils : celui de MQTT et la boucle principale
+envoi_en_attente = 0  # messages renvoyés depuis le tampon qui attendent encore la réponse de Kafka
 
+
+def rapport_tampon(err, msg):
+    """Accusé de réception d'un message renvoyé depuis le tampon."""
+    global envoi_en_attente
+    rapport_kafka(err, msg)  # même traitement qu'un message normal : un échec repart dans le tampon
+    envoi_en_attente -= 1
+    if envoi_en_attente == 0:
+        tampon.terminer_envoi(CHEMIN_TAMPON)  # Kafka a répondu pour tout le fichier : on peut le supprimer
+
+
+def renvoyer_du_tampon(cle, valeur):
+    global envoi_en_attente
+    try:
+        producteur.produce(KAFKA_TOPIC, key=cle, value=valeur, on_delivery=rapport_tampon)
+        envoi_en_attente += 1
+    except BufferError:
+        mettre_en_tampon(cle, valeur)  # file pleine : il repart dans le nouveau tampon
 
 def vider_tampon_si_possible():
     """Renvoie le tampon à Kafka : toutes les 5 s si Kafka répond, sinon un essai toutes les 30 s."""
     global dernier_vidage
-    if time.time() - dernier_vidage < (5 if kafka_ok else 30):
-        return
+    if envoi_en_attente > 0 or time.time() - dernier_vidage < (5 if kafka_ok else 30):
+        return  # un renvoi attend encore ses réponses, ou c'est trop tôt
     dernier_vidage = time.time()
-    n = tampon.vider(CHEMIN_TAMPON, envoyer_kafka)
+    n = tampon.vider(CHEMIN_TAMPON, renvoyer_du_tampon)
+    if envoi_en_attente == 0:
+        tampon.terminer_envoi(CHEMIN_TAMPON)  # rien n'est parti vers Kafka : rien à attendre
     if n:
         stats["tampon_renvoyes"] += n
         print(f"[passerelle-{SERVICE}] {n} messages du tampon renvoyés à Kafka")

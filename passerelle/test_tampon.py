@@ -49,7 +49,9 @@ def test_renvoi_interrompu_relu():
     chemin.rename(chemin.with_suffix(".envoi"))  # simule un arrêt pendant un renvoi
     tampon.ecrire(chemin, "nouveau", '{"a": 1}')
     recus = []
-    assert tampon.vider(chemin, lambda c, v: recus.append(c)) == 2
+    assert tampon.vider(chemin, lambda c, v: recus.append(c)) == 1  # d'abord l'ancien renvoi
+    tampon.terminer_envoi(chemin)
+    assert tampon.vider(chemin, lambda c, v: recus.append(c)) == 1  # puis le nouveau tampon
     assert recus == ["ancien", "nouveau"]
 
 
@@ -58,11 +60,20 @@ def test_echec_pendant_renvoi_garde_le_message():
     tampon.ecrire(chemin, "p1", '{"a": 1}')
     # Kafka retombe pendant le renvoi : le message repart dans le tampon
     tampon.vider(chemin, lambda c, v: tampon.ecrire(chemin, c, v))
+    tampon.terminer_envoi(chemin)
     recus = []
     assert tampon.vider(chemin, lambda c, v: recus.append(c)) == 1
     assert recus == ["p1"]
 
-
+def test_envoi_garde_jusqu_a_confirmation():
+    chemin = nouveau_chemin()
+    tampon.ecrire(chemin, "p1", '{"a": 1}')
+    tampon.vider(chemin, lambda c, v: None)
+    envoi = chemin.with_suffix(".envoi")
+    assert envoi.exists()  # renvoyé mais pas encore confirmé : le fichier reste
+    tampon.terminer_envoi(chemin)
+    assert not envoi.exists()
+    
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0

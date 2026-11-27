@@ -6,8 +6,10 @@ import tempfile
 os.environ.setdefault("SERVICE", "1")
 os.environ["APPRENTISSAGE"] = "1"
 os.environ["DOSSIER_ETAT"] = tempfile.mkdtemp()  # ne touche jamais au vrai dossier etat/
+os.environ["DOSSIER_TAMPON"] = tempfile.mkdtemp()  # ni au vrai dossier tampon/
 
 import passerelle
+import tampon
 from apprentissage import ModeleEnLigne
 
 
@@ -94,6 +96,45 @@ def test_deux_sejours_par_lit():
     assert "pt-lit-a" not in passerelle.sejours  # parti depuis deux admissions : oublié
     assert "pt-lit-b" in passerelle.sejours and "pt-lit-c" in passerelle.sejours
     assert passerelle.stats["sejours_oublies"] == avant + 1   
+
+
+class FauxProducteur:
+    """Remplace Kafka : garde les accusés de réception pour les déclencher à la main."""
+    def __init__(self):
+        self.envois = []
+
+    def produce(self, topic, key=None, value=None, on_delivery=None):
+        self.envois.append((on_delivery, key, value))
+
+
+class FauxMessage:
+    def __init__(self, cle, valeur):
+        self.cle, self.valeur = cle, valeur
+
+    def key(self):
+        return self.cle.encode()
+
+    def value(self):
+        return self.valeur.encode()
+
+
+def test_tampon_garde_jusqu_a_confirmation():
+    faux = FauxProducteur()
+    passerelle.producteur, passerelle.kafka_ok, passerelle.dernier_vidage = faux, True, 0.0
+    try:
+        tampon.ecrire(passerelle.CHEMIN_TAMPON, "p1", '{"a": 1}')
+        tampon.ecrire(passerelle.CHEMIN_TAMPON, "p2", '{"a": 2}')
+        passerelle.vider_tampon_si_possible()
+        envoi = passerelle.CHEMIN_TAMPON.with_suffix(".envoi")
+        assert len(faux.envois) == 2 and envoi.exists()  # renvoyés, pas encore confirmés : fichier gardé
+        rapport, cle, valeur = faux.envois[0]
+        rapport(None, FauxMessage(cle, valeur))  # Kafka confirme le premier
+        assert envoi.exists()
+        rapport, cle, valeur = faux.envois[1]
+        rapport(None, FauxMessage(cle, valeur))  # puis le second
+        assert not envoi.exists()  # tout est confirmé : fichier supprimé
+    finally:
+        passerelle.producteur = None
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0

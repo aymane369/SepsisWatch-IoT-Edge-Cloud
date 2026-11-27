@@ -29,11 +29,29 @@ def _relire(fichier, envoyer):
                 continue  # ligne coupée par un arrêt brutal
             envoyer(m["cle"], m["valeur"])
             n += 1
-    fichier.unlink()
     return n
 
 
 def vider(chemin, envoyer):
+    """Renvoie chaque message du tampon avec envoyer(cle, valeur). Renvoie le nombre de messages relus.
+
+    Le fichier .envoi n'est PAS supprimé ici : l'appelant appelle terminer_envoi()
+    quand Kafka a répondu pour tous ses messages. Après un plantage, il est donc relu.
+    """
+    chemin = Path(chemin)
+    en_cours = chemin.with_suffix(".envoi")
+    if not en_cours.exists():
+        if not chemin.exists():
+            return 0
+        # on renomme d'abord : les échecs pendant le renvoi repartent dans un nouveau tampon
+        os.replace(chemin, en_cours)
+    # sinon, un .envoi existe encore (renvoi précédent interrompu) : on le relit en premier
+    return _relire(en_cours, envoyer)
+
+
+def terminer_envoi(chemin):
+    """Supprime le fichier .envoi : Kafka a répondu pour tous les messages renvoyés."""
+    Path(chemin).with_suffix(".envoi").unlink(missing_ok=True)
     """Renvoie chaque message du tampon avec envoyer(cle, valeur). Renvoie le nombre de messages relus."""
     chemin = Path(chemin)
     en_cours = chemin.with_suffix(".envoi")
