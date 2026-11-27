@@ -4,8 +4,7 @@ $compose = "-f", "docker-compose.yml", "-f", "docker-compose.kafka-dev.yml"
 
 docker compose @compose down
 docker volume rm sepsiswatch-iot-edge-cloud_mosquitto_data
-Remove-Item etat\* -ErrorAction SilentlyContinue
-Remove-Item tampon\* -ErrorAction SilentlyContinue
+docker volume rm sepsiswatch-iot-edge-cloud_etat sepsiswatch-iot-edge-cloud_tampon 2>$null
 docker compose @compose up -d --build
 
 Write-Host "Systeme remis a zero : tout repart comme au premier demarrage."

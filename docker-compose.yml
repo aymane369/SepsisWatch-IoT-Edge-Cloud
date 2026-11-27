@@ -30,8 +30,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - ./tampon:/app/tampon
-      - ./etat:/app/etat
+      - tampon:/app/tampon
+      - etat:/app/etat
     
 
   passerelle-2:
@@ -48,8 +48,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - ./tampon:/app/tampon
-      - ./etat:/app/etat
+      - tampon:/app/tampon
+      - etat:/app/etat
   passerelle-3:
     build: ./passerelle
     container_name: passerelle-3
@@ -64,8 +64,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - ./tampon:/app/tampon
-      - ./etat:/app/etat
+      - tampon:/app/tampon
+      - etat:/app/etat
   passerelle-4:
     build: ./passerelle
     container_name: passerelle-4
@@ -80,8 +80,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
-      - ./tampon:/app/tampon
-      - ./etat:/app/etat
+      - tampon:/app/tampon
+      - etat:/app/etat
   nodered:
     image: nodered/node-red:5.0.9
     container_name: nodered
@@ -104,7 +104,7 @@ services:
       - MQTT_MDP=${MQTT_MDP_SIMULATEUR}
     volumes:
       - ./data:/app/data:ro
-      - ./etat:/app/etat
+      - etat:/app/etat
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -112,5 +112,7 @@ services:
 volumes:
   nodered_data:
   mosquitto_data:
+  etat:
+  tampon:
 
 
