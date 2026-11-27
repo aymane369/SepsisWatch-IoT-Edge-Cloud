@@ -21,6 +21,7 @@ services:
     environment:
       - SERVICE=1
       - MQTT_HOST=mosquitto
+      - PSEUDO_CLE=${PSEUDO_CLE}
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -35,8 +36,9 @@ services:
     build: ./passerelle
     container_name: passerelle-2
     environment:
-      - SERVICE=2
+      - SERVICE=1
       - MQTT_HOST=mosquitto
+      - PSEUDO_CLE=${PSEUDO_CLE}
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -49,8 +51,9 @@ services:
     build: ./passerelle
     container_name: passerelle-3
     environment:
-      - SERVICE=3
+      - SERVICE=1
       - MQTT_HOST=mosquitto
+      - PSEUDO_CLE=${PSEUDO_CLE}
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -63,8 +66,9 @@ services:
     build: ./passerelle
     container_name: passerelle-4
     environment:
-      - SERVICE=4
+      - SERVICE=1
       - MQTT_HOST=mosquitto
+      - PSEUDO_CLE=${PSEUDO_CLE}
     depends_on:
       mosquitto:
         condition: service_healthy

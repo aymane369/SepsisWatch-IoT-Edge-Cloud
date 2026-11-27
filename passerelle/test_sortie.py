@@ -1,7 +1,9 @@
 """Tests de l'apprentissage dans la passerelle, sans MQTT ni Docker.
 Le modèle et la liste des patients appris sont écrits dans un dossier temporaire."""
+import json
 import os
 import tempfile
+from types import SimpleNamespace
 
 os.environ.setdefault("SERVICE", "1")
 os.environ["APPRENTISSAGE"] = "1"
@@ -105,7 +107,8 @@ class FauxProducteur:
 
     def produce(self, topic, key=None, value=None, on_delivery=None):
         self.envois.append((on_delivery, key, value))
-
+    def poll(self, delai):
+        return 0
 
 class FauxMessage:
     def __init__(self, cle, valeur):
@@ -164,6 +167,43 @@ def test_journal_repris_au_demarrage():
     tampon.vider(passerelle.CHEMIN_TAMPON, lambda c, v: recus.append(c))
     tampon.terminer_envoi(passerelle.CHEMIN_TAMPON)
     assert recus == ["p9"]  # il attend dans le tampon, prêt à être renvoyé
+
+def test_pseudonyme_stable_et_secret():
+    passerelle.PSEUDO_CLE = "cle-de-test"
+    try:
+        a = passerelle.pseudonyme("p015081")
+        assert a == passerelle.pseudonyme("p015081")  # même patient : même pseudonyme
+        assert a != "p015081" and a != passerelle.pseudonyme("p015082")
+        passerelle.PSEUDO_CLE = "autre-cle"
+        assert passerelle.pseudonyme("p015081") != a  # sans la bonne clé, impossible de le retrouver
+    finally:
+        passerelle.PSEUDO_CLE = ""
+
+
+class FauxClient:
+    """Remplace Mosquitto : garde les messages publiés."""
+    def __init__(self):
+        self.publies = []
+
+    def publish(self, topic, payload, qos=0, retain=False):
+        self.publies.append((topic, payload))
+
+
+def test_kafka_recoit_un_pseudonyme():
+    faux, client = FauxProducteur(), FauxClient()
+    passerelle.producteur, passerelle.PSEUDO_CLE = faux, "cle-de-test"
+    try:
+        m = {"patient_id": "pt-vrai", "service": 1, "lit": 19, "heure_sejour": 1,
+             "timestamp": "2026-11-27T03:00:00+00:00",
+             "hr": 80.0, "o2sat": 98.0, "temp": 37.0, "sbp": 120.0, "map": 85.0, "dbp": 70.0, "resp": 16.0}
+        passerelle.on_message(client, None, SimpleNamespace(topic="hopital/service-1/lit-19/vitals",
+                                                            payload=json.dumps(m).encode()))
+        _, cle, valeur = faux.envois[-1]
+        assert cle == passerelle.pseudonyme("pt-vrai") and json.loads(valeur)["patient_id"] == cle
+        assert json.loads(client.publies[-1][1])["patient_id"] == "pt-vrai"  # Node-RED garde le vrai
+    finally:
+        passerelle.producteur, passerelle.PSEUDO_CLE = None, ""
+        passerelle.journal_en_attente.clear()
 if __name__ == "__main__":
     tests = [f for nom, f in list(globals().items()) if nom.startswith("test_")]
     reussis = 0

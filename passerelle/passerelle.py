@@ -11,6 +11,8 @@ from pathlib import Path
 from features import BORNES, nettoyer, ajouter_mesure, calculer_variables, pressions_incoherentes
 import tampon
 from apprentissage import ModeleEnLigne, REGLAGES_RETENUS
+import hmac
+import hashlib
 
 SERVICE = int(os.environ.get("SERVICE") or (sys.argv[1] if len(sys.argv) > 1 else 1))
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
@@ -471,6 +473,15 @@ def traiter(m):
     if m["alerte"] is not None:
         stats["alertes_" + m["alerte"]] += 1
     return m
+PSEUDO_CLE = os.environ.get("PSEUDO_CLE", "")  # clé secrète, partagée par les 4 passerelles, jamais dans Git
+
+
+def pseudonyme(patient_id):
+    """Identifiant stable et non réversible pour le Cloud (HMAC-SHA256 avec la clé secrète)."""
+    if not PSEUDO_CLE:
+        return patient_id  # pas de clé (développement) : identifiant d'origine
+    return "x" + hmac.new(PSEUDO_CLE.encode(), patient_id.encode(), hashlib.sha256).hexdigest()[:16]
+
 
 def est_plus_ancien(t1, t2):
     """Vrai si l'horodatage t1 est antérieur à t2 (faux si l'un des deux manque ou est illisible)."""
@@ -527,7 +538,9 @@ def on_message(client, userdata, msg):
     client.publish(topic, json.dumps(sortie), qos=2)
     if producteur is not None:
         with verrou_kafka:
-            envoyer_kafka(sortie["patient_id"], json.dumps(sortie))
+            # le Cloud reçoit un pseudonyme ; Node-RED, à l'hôpital, a gardé le vrai identifiant
+            pour_cloud = dict(sortie, patient_id=pseudonyme(sortie["patient_id"]))
+            envoyer_kafka(pour_cloud["patient_id"], json.dumps(pour_cloud))
             producteur.poll(0)
             vider_tampon_si_possible()
     if stats["recus"] % 100 == 0:
@@ -544,6 +557,8 @@ if __name__ == "__main__":
         print(f"[passerelle-{SERVICE}] modèle fixe")
     
     charger_memoire()
+    if not PSEUDO_CLE:
+        print(f"[passerelle-{SERVICE}] ATTENTION : pas de PSEUDO_CLE, les vrais identifiants partent vers Kafka")
     if producteur is not None:
         n = reprendre_journal()
         if n:
