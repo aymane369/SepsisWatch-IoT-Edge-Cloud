@@ -85,7 +85,11 @@ else:
     print(f"Reprise : {NB_LITS} lits rechargés, prochain fichier {prochain}")
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simulateur")
-client.connect(os.environ.get("MQTT_HOST", "localhost"), 1883)
+# Testament : si le simulateur disparaît sans prévenir, Mosquitto publie « hors ligne » à sa place
+client.will_set("hopital/etat/simulateur", "hors ligne", qos=1, retain=True)
+# À chaque connexion (et reconnexion), il annonce lui-même qu'il est là
+client.on_connect = lambda c, u, f, rc, p: c.publish("hopital/etat/simulateur", "en ligne", qos=1, retain=True)
+client.connect(os.environ.get("MQTT_HOST", "localhost"), 1883, keepalive=10)
 client.loop_start()
 
 tour = 0
